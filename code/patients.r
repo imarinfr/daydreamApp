@@ -12,7 +12,7 @@ patientsUI <- function(id) {
       column(5, align = "center", hidden(disabled(textInput(ns("surname"), "Surname"))))
     ),
     fluidRow(
-      column(4, offset = 2, align = "center", hidden(disabled(dateInput(ns("dob"), "Date of Birth", format = "mm/dd/yyyy", value = NA)))),
+      column(3, align = "center", hidden(disabled(dateInput(ns("dob"), "Date of Birth", format = "yyyy-mm-dd")))),
       column(2, align = "center", hidden(textInput(ns("type"), "Type"))),
       column(2, align = "center", hidden(radioButtons(ns("gender"), "Gender", choices = c("F", "M"), selected = character(0), inline = TRUE)))
     ),
@@ -51,7 +51,7 @@ patients <- function(input, output, session) {
     if(patientdbChanged()) {
       patientdbChanged(FALSE)
       patientOut        <- patientTable[,1:6]
-      patientOut$dob    <- format(as.Date(patientOut$dob), "%m/%d/%Y")
+      patientOut$dob    <- format(as.Date(patientOut$dob), "%Y-%m-%d")
       names(patientOut) <- c("ID", "Name", "Surname", "Date of Birth", "Gender", "Type")
       output$patientdb  <- renderDataTable(patientOut, rownames = FALSE, server = FALSE, selection = "single",
                                            options = list(pageLength = 5, lengthChange = FALSE))
@@ -122,7 +122,7 @@ patients <- function(input, output, session) {
     enable("newPatient")
     disableMandatoryFields()
     hidePatientFields()
-  })
+  }, ignoreInit = TRUE)
 }
 ####################
 # ROUTINES
@@ -140,13 +140,13 @@ showPatientFields <- function()
            "osva", "osrx", "osoverrx", "odva", "odrx", "odoverrx",
            "osdiagnostic", "oddiagnostic",
            "oscomments", "odcomments",
-           "save", "cancel"), show)
+           "save", "cancel"), showElement)
 hidePatientFields <- function()
   lapply(c("id", "name", "surname", "dob", "gender", "type",
            "osva", "osrx", "osoverrx", "odva", "odrx", "odoverrx",
            "osdiagnostic", "oddiagnostic",
            "oscomments", "odcomments",
-           "save", "cancel"), hide)
+           "save", "cancel"), hideElement)
 # enable or disable fields
 enableMandatoryFields <- function()
   lapply(c("id", "name", "surname", "dob"), enable)
@@ -235,7 +235,7 @@ clearPatientFields <- function(session) {
                   "osdiagnostic", "oddiagnostic",
                   "oscomments", "odcomments")
   lapply(textFields, function(field) updateTextInput(session, field, value = ""))
-  updateDateInput(session, "dob", value = NA)
+  updateDateInput(session, "dob")
   updateRadioButtons(session, "gender", choices = c("F", "M"), selected = character(), inline = TRUE)
 }
 # select patient

@@ -5,8 +5,11 @@ library(shinyjs)
 library(shinyFiles)
 library(rhandsontable)
 library(DT)
-library(callr)
 library(plotrix)
+library(deldir)
+library(sp)
+library(rgeos)
+library(callr)
 
 source("settings.r")
 source("gamma.r")
@@ -20,11 +23,11 @@ ui <- dashboardPage(
   dashboardHeader(title = "Daydream perimetry"),
   dashboardSidebar(
     useShinyjs(),
-    actionButton("settingsbtn", label = "Settings",       icon = icon("cog"),         width = "90%"),
-    actionButton("gammabtn",    label = "Gamma function", icon = icon("bar-chart-o"), width = "90%"),
-    actionButton("patientsbtn", label = "Patients",       icon = icon("user"),        width = "90%", disabled = TRUE),
-    actionButton("testbtn",     label = "Test",           icon = icon("sad-cry"),     width = "90%"),
-    actionButton("reportbtn",   label = "Reports",        icon = icon("file-alt"),    width = "90%")
+    actionButton("settingsbtn", label = "Settings",       icon = icon("cog"),        width = "90%"),
+    actionButton("gammabtn",    label = "Gamma function", icon = icon("chart-line"), width = "90%"),
+    actionButton("patientsbtn", label = "Patients",       icon = icon("user"),       width = "90%", disabled = TRUE),
+    actionButton("testbtn",     label = "Test",           icon = icon("sad-cry"),    width = "90%"),
+    actionButton("reportbtn",   label = "Reports",        icon = icon("file-alt"),   width = "90%")
   ),
   dashboardBody(
     uiOutput("tab")

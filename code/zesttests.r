@@ -25,11 +25,6 @@ makePMF <- function (domain, start_guess, weight = 4, floor = 0.001) {
 
 #Create table of neighboring locations
 findNeighbors <- function (coord) {
-  #load libraries
-  require(deldir)
-  require(sp)
-  require(rgeos)
-
   # Function which creates Voronoi tessellation tiles from grid locations
   voroni_to_polys <- function(dd) {
     vor_desc <- tile.list(dd) # tile.list extracts the polygon data from the deldir computation
