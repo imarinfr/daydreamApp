@@ -1,23 +1,24 @@
-gammaUI <- function(id) {
+gammaUI <- function(id, envir) {
+  dayParams <- get("dayParams", envir = envir)
   ns <- NS(id)
   tagList(
     fluidRow(
       column(6,
         column(7, textInput(ns("serverIP"), "Server IP", dayParams$serverIP)),
         column(5, selectInput(ns("eye"), "Eye", choices = c("OD", "OS"))),
-        column(7, disabled(numericInput(ns("nreps"), "Repetitions", 3, min = 1, max = 3))),
+        column(7, numericInput(ns("nreps"), "Repetitions", 3, min = 1, max = 3)),
         column(12, htmlOutput(ns("msgconn")))
       ),
       column(6,
-        column(4, align = "center", disabled(numericInput(ns("fr1"), "Pixel From", 0))),
+        column(4, align = "center", numericInput(ns("fr1"), "Pixel From", 0)),
         column(4, align = "center", numericInput(ns("by1"), "Pixel Step", 5)),
         column(4, align = "center", numericInput(ns("to1"), "Pixel To", 25)),
-        column(4, align = "center", disabled(numericInput(ns("fr2"), "", 25))),
+        column(4, align = "center", numericInput(ns("fr2"), "", 25)),
         column(4, align = "center", numericInput(ns("by2"), "", 25)),
         column(4, align = "center", numericInput(ns("to2"), "", 225)),
-        column(4, align = "center", disabled(numericInput(ns("fr3"), "", 225))),
+        column(4, align = "center", numericInput(ns("fr3"), "", 225)),
         column(4, align = "center", numericInput(ns("by3"), "", 5)),
-        column(4, align = "center", disabled(numericInput(ns("to3"), "", 255)))
+        column(4, align = "center", numericInput(ns("to3"), "", 255))
       )
     ),
     fluidRow(
@@ -34,7 +35,9 @@ gammaUI <- function(id) {
   )
 }
 
-gamma <- function(input, output, session) {
+gamma <- function(input, output, session, envir) {
+  dayParams <- get("dayParams", envir = envir)
+  opiInitialized <- get("opiInitialized", envir = envir)
   debugrun <- FALSE
   ns <- session$ns
   eye <- NULL
@@ -53,7 +56,7 @@ gamma <- function(input, output, session) {
   ####################
   # initialize OPI
   observeEvent(input$init, {
-    opiParams <- fillOpiParams(input$serverIP)
+    opiParams <- fillOpiParams(input$serverIP, dayParams$runType)
     opiParams$lut <- 0:255 # LUT is pixel value itself for testing purposes
     if(!debugrun) {
       do.call(opiInitialize, opiParams)
@@ -62,7 +65,7 @@ gamma <- function(input, output, session) {
     msg("OPI connection opened")
     disable("init")
     enable("close")
-    show("save")
+    showElement("save")
     disableAll()
     lutTable <<- generateLUTtable(input$nreps, input$fr1, input$by1, input$to1, input$by2, input$to2, input$by3, input$to3)
     output$lut <- renderRHandsontable(handsontable(lutTable))
@@ -75,7 +78,7 @@ gamma <- function(input, output, session) {
     msg("OPI connection closed")
     enable("init")
     disable("close")
-    hide("save")
+    hideElement("save")
     enableAll()
     lutTable       <- NULL
     output$lut     <- NULL

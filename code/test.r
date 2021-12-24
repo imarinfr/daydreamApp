@@ -1,4 +1,6 @@
-testUI <- function(id) {
+testUI <- function(id, envir) {
+  dayParams <- get("dayParams", envir = envir)
+  gridNames <- get("gridNames", envir = envir)
   ns <- NS(id)
   tagList(
     fluidRow(
@@ -43,7 +45,14 @@ testUI <- function(id) {
   )
 }
 
-test <- function(input, output, session) {
+test <- function(input, output, session, envir) {
+  dayParams <- get("dayParams", envir = envir)
+  patientChanged <- get("patientChanged", envir = envir)
+  opiInitialized <- get("opiInitialized", envir = envir)
+  gridNames      <- get("gridNames", envir = envir)
+  grids          <- get("grids", envir = envir)
+  patient        <- get("patient", envir = envir)
+  newReports     <- get("newReports", envir = envir)
   debugrun   <- FALSE
   ns         <- session$ns
   rs         <- NA    # R session
@@ -59,6 +68,7 @@ test <- function(input, output, session) {
   msg        <- reactiveVal("Press 'Initialize OPI' to start") # message where to display status of connection, etc
   refreshout <- reactiveVal(TRUE) # refresh output graphs?
   # define routine to initialized all run control variables
+  res <- runlog <- tp0 <- tt <- tp <- tt0 <- NULL
   initRunVariables <- function() {
     res     <<- NULL        # keep results of run
     runlog  <<- NULL        # keep log of run
@@ -76,7 +86,8 @@ test <- function(input, output, session) {
   observe(
     if(patientChanged()) {
       patientChanged(FALSE)
-      output$selected <- renderUI(parsePatientOutput())
+      patient <<- get("patient", envir = envir)
+      output$selected <- renderUI(parsePatientOutput(patient))
     }
   )
   # if output data changed
@@ -92,12 +103,12 @@ test <- function(input, output, session) {
   ####################
   # if grid or eye changes
   observeEvent(input$grid, {
-    locs <<- testLocations()
+    locs <<- testLocations(grids, gridNames)
     initRunVariables()
     refreshout(TRUE)
   })
   observeEvent(input$eye, {
-    locs    <<- testLocations()
+    locs    <<- testLocations(grids, gridNames)
     if(opiInitialized()) {
       eye <- ifelse(input$eye == "OD", "R", "L")
       rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg)))
@@ -124,7 +135,7 @@ test <- function(input, output, session) {
     if(is.na(patient$id)) errorMessage("Select a patient before proceeding")
     else {
       disableElements(c("init", "serverIP"))
-      opiParams <<- fillOpiParams(input$serverIP)
+      opiParams <<- fillOpiParams(input$serverIP, dayParams)
       tryCatch({
         # start a new R session and change working directory to the same as this one
         if(!debugrun) {
@@ -133,12 +144,12 @@ test <- function(input, output, session) {
             # set working directory
             rs$run(setwd, args = list(dir = getwd()))
             # load the OPI library in background R session along with other required packages
-            rs$run(library, args = list(package = "OPI"))
-            rs$run(library, args = list(package = "deldir"))
-            rs$run(library, args = list(package = "sp"))
-            rs$run(library, args = list(package = "rgeos"))
+            rs$run(do.call, args = list(what = library, args = list(package = "OPI")))
+            rs$run(do.call, args = list(what = library, args = list(package = "deldir")))
+            rs$run(do.call, args = list(what = library, args = list(package = "sp")))
+            rs$run(do.call, args = list(what = library, args = list(package = "rgeos")))
             # choose OPI in background R session
-            rs$run(chooseOpi, args = list(opiImplementation = chooseOpi()[.OpiEnv$chooser]))
+            rs$run(do.call, args = list(what = chooseOpi, args = list(opiImplementation = chooseOpi()[.OpiEnv$chooser])))
           })
           # initialize OPI
           rs$run(do.call, args = list(what = opiInitialize, args = opiParams))
@@ -175,7 +186,7 @@ test <- function(input, output, session) {
     enableElements(c("init", "serverIP"))
     msg("OPI connection closed")
     opiInitialized(FALSE)
-    locs    <<- testLocations()
+    locs    <<- testLocations(grids, gridNames)
     foveadb <<- NA
     initRunVariables()
     refreshout(TRUE)
@@ -224,7 +235,7 @@ test <- function(input, output, session) {
       initRunVariables()
       disableElements(c("eye", "size", "grid"))
     }
-    runTest()
+    runTest(dayParams)
   }, ignoreInit = TRUE)
   # pause test halfway through
   observeEvent(input$pause, {
@@ -259,7 +270,7 @@ test <- function(input, output, session) {
   }, ignoreInit = TRUE)
   # save test once finished
   observeEvent(input$save, { # save and allow to run a fresh test
-    saveResults()
+    saveResults(patient, dayParams$resPath, dayParams$runType, grids, gridNames)
     updateTextInput(session, "comments", value = "")
     disableElements(c("save", "cancel"))
     enableElements(c("eye", "size", "grid", "fovea", "close", "run"))
@@ -348,32 +359,32 @@ test <- function(input, output, session) {
   # SUBROUTINES
   ####################
   # get test locations depending on the grid we are interested on
-  testLocations <- function() {
+  testLocations <- function(grids, gridNames) {
     if(is.null(grids)) return(NULL)
     locs <- grids[[which(gridNames %in% input$grid)]]
     if(input$eye == "OS") locs$x <- -locs$x
     return(initLocations(locs))
   }
   # run Test
-  runTest <- function() {
+  runTest <- function(params) {
     go    <<- TRUE
     begin <<- FALSE
     # if connection has not been established yet, do it
     if(is.na(con)) {
       if(!debugrun) {
-        if(dayParams$runType == "Size perimetry") type <- "size"
+        if(params$runType == "Size perimetry") type <- "size"
         else type <- "luminance"
-        opts <- list(size = size, lum = lum, color = dayParams$color, bg = dayParams$bg,
-                     minlum = dayParams$minlum, maxlum = dayParams$maxlum,
-                     minarea = dayParams$minarea, maxarea = dayParams$maxarea,
-                     presTime = dayParams$presTime, respWindow = dayParams$respWindow, respWinPed = dayParams$respWinPed, 
-                     respTimesLength = dayParams$respTimesLength, minISI = dayParams$minISI)
+        opts <- list(size = size, lum = lum, color = params$color, bg = params$bg,
+                     minlum = params$minlum, maxlum = params$maxlum,
+                     minarea = params$minarea, maxarea = params$maxarea,
+                     presTime = params$presTime, respWindow = params$respWindow, respWinPed = params$respWinPed, 
+                     respTimesLength = params$respTimesLength, minISI = params$minISI)
         eye <- ifelse(input$eye == "OD", "R", "L")
         rs$call(zestTest, args = list(type = type, eye = eye, locs = locs[, c("x", "y", "wave")], opts = opts, port = dayParams$testPort))
         if(!is.null(rsread <- rs$read())) print(rsread$stdout)
       }
       # start client
-      con <<- socketConnection(port = dayParams$testPort, server = FALSE, open = "")
+      con <<- socketConnection(port = params$testPort, server = FALSE, open = "")
       # loop until can open the connection. Connection is open so that execution
       # is blocked when waiting for perimetry test server to respond
       while(tryCatch({open(con, open = "w+b"); FALSE},
@@ -382,7 +393,7 @@ test <- function(input, output, session) {
     }
     disableElements(c("close", "run", "fovea", "stop", "save"))
     enableElements(c("pause"))
-    msg(paste(dayParams$runType, "ZEST test running"))
+    msg(paste(params$runType, "ZEST test running"))
   }
   # stop test
   stopTest <- function() {
@@ -433,17 +444,17 @@ test <- function(input, output, session) {
       tp     = tp))
   }
   # save results at the end of the test
-  saveResults <- function() {
+  saveResults <- function(patient, path, runType, grids, gridNames) {
     systime  <- Sys.time()
     tdate    <- format(systime, "%Y-%m-%d")
     ttime    <- format(systime, "%H:%M:%S")
     # if patient folder does not exist, then create
-    patientDir <- paste0(dayParams$resPath, patient$id, "/")
+    patientDir <- paste0(path, patient$id, "/")
     dir.create(patientDir, showWarnings = FALSE) # create directories if they do not exist
     dir.create(paste0(patientDir, "raw/"), showWarnings = FALSE)
-    if(dayParams$runType == "Luminance perimetry") runType <- "luminance"
-    if(dayParams$runType == "Size perimetry")      runType <- "size"
-    if(dayParams$runType == "Simulation")          runType <- "simulation"
+    if(runType == "Luminance perimetry") runType <- "luminance"
+    if(runType == "Size perimetry")      runType <- "size"
+    if(runType == "Simulation")          runType <- "simulation"
     # save raw log first
     fnamelog <- paste0(patientDir, "raw/", trimws(as.character(patient$id)), "_", runType, "_", input$eye, format(systime, "_%Y%m%d_%H%M%S"), ".csv")
     write.csv(runlog, file = fnamelog, row.names = FALSE)
@@ -472,17 +483,17 @@ errortxt <- function(txt) return(paste("<span style=\"color:#FF0000\">", txt, "<
 enableElements <- function(ids) lapply(ids, enable)
 disableElements <- function(ids) lapply(ids, disable)
 # fill out parameters to initialize the OPI, but also as side effect, it sets the OPI implementation
-fillOpiParams <- function(serverIP) {
+fillOpiParams <- function(serverIP, params) {
   # choose correct OPI implementation
-  if(dayParams$runType != "Simulation") {
+  if(params$runType != "Simulation") {
     chooseOpi("Daydream")
     # get parameters for the Daydream implementation
     opiParams <- opiGetParams("opiInitialize")
     # and use the values in DayParams settings for initialization parameters
     opiParams$ip   <- serverIP
-    opiParams$port <- dayParams$serverPort
-    opiParams$lut  <- read.csv(paste0(dayParams$confPath, dayParams$gammaFile), header = FALSE)$V1
-    opiParams$fovy <- dayParams$fovy
+    opiParams$port <- params$serverPort
+    opiParams$lut  <- read.csv(paste0(params$confPath, params$gammaFile), header = FALSE)$V1
+    opiParams$fovy <- params$fovy
   } else {
     #chooseOpi("SimHenson")
     #chooseOpi("SimYes")
@@ -492,7 +503,7 @@ fillOpiParams <- function(serverIP) {
   return(opiParams)
 }
 # patient's information to show: id, name, surname, age, Gender
-parsePatientOutput <- function() {
+parsePatientOutput <- function(patient) {
   if(is.na(patient$id)) {
     txt <- errortxt("Please select a patient to continue")
   } else {
@@ -549,10 +560,10 @@ showPlot <- function(locs, eye, foveadb) {
 }
 # prepare test results to show next to the plot
 renderResult <- function(locs, res, runlog) {
-  if(is.null(res)) {
-    level <- x <- y <- time <- ""
-    seentxt <- ""
-  } else {
+  rtsd <- rtm <- seentxt <- level <- x <- y <- time <- ""
+  fp <- fpt <- fpp <- fn <- fnt <- fnp <- 0
+  tttxt <- tptxt <- "00:00"
+  if(!is.null(res)) {
     level <- res$level
     x     <- paste(res$x, "degrees")
     y     <- paste(res$y, "degrees")
@@ -563,11 +574,7 @@ renderResult <- function(locs, res, runlog) {
   }
   npoints   <- length(locs$done) # total number of locations
   nfinished <- sum(locs$done)    # locations finished
-  if(is.null(runlog)) {
-    fp <- fpt <- fpp <- fn <- fnt <- fnp <- 0
-    tttxt <- tptxt <- "00:00"
-    rtsd <- rtm <- ""
-  } else {
+  if(!is.null(runlog)) {
     # compute false positives and negatives
     fp  <- sum(runlog$level == 50 & runlog$seen)
     fpt <- sum(runlog$level == 50)
@@ -602,7 +609,6 @@ renderResult <- function(locs, res, runlog) {
   if(level != "") level <- paste(level, "dB")
   if(rtm != "") rtm <- paste(rtm, "ms")
   if(rtsd != "") rtsd <- paste(rtsd, "ms")
-  
   # get state text
   txt <- paste("<strong>Stimulus x:</strong>", x, "<br/>")
   txt <- paste(txt, "<strong>Stimulus y:</strong>", y, "<br/><br/>")

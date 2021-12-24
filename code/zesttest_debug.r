@@ -1,6 +1,8 @@
-#setwd("/Users/ivanmarin-franch/06.optocom/01.projects/01.Wall/05.daydreamOPI/02.daydreamApp/code")
-setwd("/Users/chluk/OneDrive - Deakin University/Research/DayDreamOPI/dayApp/code")
+setwd("/Users/ivanmarin-franch/06.optocom/03.software/daydreamApp/code/")
 library(OPI)
+library(deldir)
+library(sp)
+library(rgeos)
 debugSource("zesttests.r")
 type <- "size"
 eye  <- "R"
@@ -17,7 +19,7 @@ opts <- list(size = size, lum = lum, color = dayParams$color, bg = dayParams$bg,
              presTime = dayParams$presTime, respWindow = dayParams$respWindow, respWinPed = dayParams$respWinPed,
              respTimesLength = dayParams$respTimesLength, minISI = dayParams$minISI)
 
-chooseOpi("SimHenson")
+chooseOpi("SimNo")
 opiParams <- opiGetParams("opiInitialize")
 
 opiParams$ip <- "192.168.43.208"

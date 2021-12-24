@@ -99,7 +99,7 @@ zestTest <- function(type, eye, locs, opts, port = 6011) {
     writeBin(as.numeric(th), con)
     # Time it was seen or response window if not seen
     writeBin(as.logical(seen), con)
-    if(seen) writeBin(as.numeric(round(time)), con)
+    if(seen) writeBin(as.numeric(time), con)
     else writeBin(as.numeric(respWin), con)
     # we done or need to keep going?
     writeBin(as.logical(done), con)
@@ -147,7 +147,7 @@ zestTest <- function(type, eye, locs, opts, port = 6011) {
   }
   
   # create socket connection and attempt to open it until we connect to the server
-  con <- socketConnection(port = port, server = TRUE, open = "w+b")
+  con <- socketConnection(port = port, server = TRUE, open = "w+b", blocking = TRUE)
   # vector with states
   states <- lapply(1:nrow(locs), function(i)
   ZEST.start(domain = domain, prior = prior_pmf,
@@ -167,7 +167,7 @@ zestTest <- function(type, eye, locs, opts, port = 6011) {
   ##########################################################################################################
   
   # start listening to the server
-  while(TRUE) {
+  repeat{
     command <- readBin(con, "character")
     if(command == "STOP") break
     # deal with FALSE trials
@@ -177,7 +177,7 @@ zestTest <- function(type, eye, locs, opts, port = 6011) {
       size  <- readBin(con, "numeric") # ignore size for luminance perimetry
       level <- readBin(con, "numeric")
       res   <- opiPresent(makeStimHelper(x,y)(level, 0))
-      sendToSocket(x, y, level, NA, res$seen, res$time, respWin, FALSE)
+      sendToSocket(x, y, level, NA, res$seen, res$time, respWin[1], FALSE)
       next
     }
     if(command != "NEXT") stop("invalid command") # if at this stage, command is not NEXT, something's wrong
@@ -218,7 +218,7 @@ zestTest <- function(type, eye, locs, opts, port = 6011) {
           }
         }
       }
-      sendToSocket(locs$x[loc], locs$y[loc], tail(states[[loc]]$stimuli, 1), max(-1, round(ZEST.final(states[[loc]]))), sr$resp$seen, sr$resp$time, respWin, ZEST.stop(states[[loc]]))
+      sendToSocket(locs$x[loc], locs$y[loc], tail(states[[loc]]$stimuli, 1), max(-1, round(ZEST.final(states[[loc]]))), sr$resp$seen, sr$resp$time, respWin[1], ZEST.stop(states[[loc]]))
       # wait if necessary
       if(sr$resp$seen) {
         if (sr$resp$time > 150) {

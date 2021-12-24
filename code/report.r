@@ -7,7 +7,12 @@ reportUI <- function(id) {
   )
 }
 
-report <- function(input, output, session) {
+report <- function(input, output, session, envir) {
+  dayParams    <- get("dayParams", envir = envir)
+  newReports   <- get("newReports", envir = envir)
+  patientTable <- get("patientTable", envir = envir)
+  gridNames    <- get("gridNames", envir = envir)
+  grids        <- get("grids", envir = envir)
   ns        <- session$ns
   psel      <- reactive(!is.null(input$records_rows_selected))
   perimetry <- NULL
@@ -22,14 +27,16 @@ report <- function(input, output, session) {
     if(newReports()) {
       newReports(FALSE)
       # get new reports if any exist
-      reports <<- getReports()
-      # rearrange and change column names for output
-      reportsOut <- reports[c("id", "name", "surname", "type", "date", "time", "eye", "perimetry", "grid")]
-      # find the outputname for grid
-      reportsOut$grid <- lapply(reportsOut$grid, function(gg) gridNames[which(names(grids) %in% gg)])
-      names(reportsOut) <- c("ID", "Name", "Surname", "Type", "Date", "Time", "Eye", "Perimetry", "Grid")
-      output$records <- renderDataTable(reportsOut, rownames = FALSE, server = FALSE, selection = "single",
-                                        options = list(pageLength = 5, lengthChange = FALSE))
+      reports <<- getReports(dayParams$resPath, patientTable)
+      if(!is.null(reports)) {
+        # rearrange and change column names for output
+        reportsOut <- reports[,c("id", "name", "surname", "type", "date", "time", "eye", "perimetry", "grid")]
+        # find the output name for grid
+        reportsOut$grid <- lapply(reportsOut$grid, function(gg) gridNames[which(names(grids) %in% gg)])
+        names(reportsOut) <- c("ID", "Name", "Surname", "Type", "Date", "Time", "Eye", "Perimetry", "Grid")
+        output$records <- renderDataTable(reportsOut, rownames = FALSE, server = FALSE, selection = "single",
+                                          options = list(pageLength = 5, lengthChange = FALSE))
+      }
     }
   )
   ####################
@@ -39,7 +46,7 @@ report <- function(input, output, session) {
   observeEvent(psel(), {
     if(psel()) {
       perimetry <<- reports$perimetry[input$records_rows_selected]
-      record    <<- getRecord(reports[input$records_rows_selected,])
+      record    <<- getRecord(reports[input$records_rows_selected,], dayParams$resPath)
       locs      <<- grids[[which(names(grids) %in% reports$grid[input$records_rows_selected])]][,c("x", "y")]
       enable("genpdf")
     } else {
@@ -67,9 +74,9 @@ report <- function(input, output, session) {
 # ROUTINES
 ####################
 # get all available reports and sort them by date, then time
-getReports <- function() {
+getReports <- function(path, patientTable) {
   # first get all reports
-  reports <- do.call(rbind, lapply(paste0(dayParams$resPath, dir(dayParams$resPath)), function(path) {
+  reports <- do.call(rbind, lapply(paste0(path, dir(path)), function(path) {
     # for each file
     dat <- lapply(dir(path, pattern = "*.csv"), function(ff) {
       # get the indices to be able to extract the perimetry type and grid used
@@ -81,6 +88,7 @@ getReports <- function() {
     # merge all available reports
     return(do.call(rbind, dat))
   }))
+  if(is.null(reports)) return(NULL)
   # merge with patient db table to get name, surname, and type of the patient
   reports <- merge(reports, patientTable[,c("id", "name", "surname", "type")], by = "id")
   # sort by date and time
@@ -89,8 +97,8 @@ getReports <- function() {
   return(reports)
 }
 # get record from results
-getRecord <- function(dat) {
-  fname <- paste0(dayParams$resPath, dat$id, "/", paste(dat$id, dat$perimetry, dat$grid, sep = "_"), ".csv")
+getRecord <- function(dat, path) {
+  fname <- paste0(path, dat$id, "/", paste(dat$id, dat$perimetry, dat$grid, sep = "_"), ".csv")
   res   <- read.csv(fname, stringsAsFactors = FALSE)
   return(res[which(res$date == dat$date[1] & res$time == dat$time[1]),])
 }

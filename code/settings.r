@@ -1,4 +1,5 @@
-settingsUI <- function(id) {
+settingsUI <- function(id, envir) {
+  dayParams <- get("dayParams", envir = envir)
   # init gamma file choices and selection
   choices  <- dir(dayParams$confPath, pattern = "*.csv")
   selected <- ""
@@ -53,7 +54,9 @@ settingsUI <- function(id) {
   )
 }
 
-settings <- function(input, output, session) {
+settings <- function(input, output, session, envir) {
+  dayParams <- get("dayParams", envir = envir)
+  settingsChanged <- get("settingsChanged", envir = envir)
   ####################
   # EVENTS
   ####################
@@ -87,8 +90,9 @@ settings <- function(input, output, session) {
   }, ignoreInit = TRUE)
   # load default values
   observeEvent(input$loadSettings, {
-    load("dayParams.rda", envir = globalenv())
-    populateDefaults(session)
+    load("dayParams.rda", envir = envir)
+    dayParams <- get("dayParams", envir = envir)
+    populateDefaults(session, dayParams)
   }, ignoreInit = TRUE)
 }
 ####################
@@ -102,31 +106,31 @@ errorMessage <- function(txt) {
     easyClose = TRUE))
 }
 # populate screen fields with saved parameter values
-populateDefaults <- function(session) {
-  updateTextInput(session,    "dbPath",          value    = dayParams$dbPath)
-  updateTextInput(session,    "resPath",         value    = dayParams$resPath)
-  updateTextInput(session,    "confPath",        value    = dayParams$confPath)
-  updateTextInput(session,    "gammaFile",       value    = dayParams$gammaFile)
-  updateTextInput(session,    "serverIP",        value    = dayParams$serverIP)
-  updateTextInput(session,    "serverPort",      value    = dayParams$serverPort)
-  updateTextInput(session,    "testPort",        value    = dayParams$testPort)
-  updateNumericInput(session, "fovy",            value    = dayParams$fovy)
-  updateSelectInput(session,  "color",           selected = dayParams$color)
-  updateRadioButtons(session, "runType",         selected = dayParams$runType)
-  updateNumericInput(session, "bg",              value    = dayParams$bg)
-  updateNumericInput(session, "minlum",          value    = dayParams$minlum)
-  updateNumericInput(session, "maxlum",          value    = dayParams$maxlum)
-  updateNumericInput(session, "minarea",         value    = dayParams$minarea)
-  updateNumericInput(session, "maxarea",         value    = dayParams$maxarea)
-  updateNumericInput(session, "maxPres",         value    = dayParams$maxPres)
-  updateSelectInput(session,  "stopType",        selected = dayParams$stopType)
-  updateNumericInput(session, "stopValue",       value    = dayParams$stopValue)
-  updateNumericInput(session, "presTime",        value    = dayParams$presTime)
-  updateNumericInput(session, "respWindow",      value    = dayParams$respWindow)
-  updateNumericInput(session, "respWinPed",      value    = dayParams$respWinPed)
-  updateNumericInput(session, "respTimesLength", value    = dayParams$respTimesLength)
-  updateNumericInput(session, "minISI",          value    = dayParams$minISI)
-  updateNumericInput(session, "fprate",          value    = dayParams$fprate)
-  updateNumericInput(session, "fnrate",          value    = dayParams$fnrate)
-  updateNumericInput(session, "refresh",         value    = dayParams$refresh)
+populateDefaults <- function(session, params) {
+  updateTextInput(session,    "dbPath",          value    = params$dbPath)
+  updateTextInput(session,    "resPath",         value    = params$resPath)
+  updateTextInput(session,    "confPath",        value    = params$confPath)
+  updateTextInput(session,    "gammaFile",       value    = params$gammaFile)
+  updateTextInput(session,    "serverIP",        value    = params$serverIP)
+  updateTextInput(session,    "serverPort",      value    = params$serverPort)
+  updateTextInput(session,    "testPort",        value    = params$testPort)
+  updateNumericInput(session, "fovy",            value    = params$fovy)
+  updateSelectInput(session,  "color",           selected = params$color)
+  updateRadioButtons(session, "runType",         selected = params$runType)
+  updateNumericInput(session, "bg",              value    = params$bg)
+  updateNumericInput(session, "minlum",          value    = params$minlum)
+  updateNumericInput(session, "maxlum",          value    = params$maxlum)
+  updateNumericInput(session, "minarea",         value    = params$minarea)
+  updateNumericInput(session, "maxarea",         value    = params$maxarea)
+  updateNumericInput(session, "maxPres",         value    = params$maxPres)
+  updateSelectInput(session,  "stopType",        selected = params$stopType)
+  updateNumericInput(session, "stopValue",       value    = params$stopValue)
+  updateNumericInput(session, "presTime",        value    = params$presTime)
+  updateNumericInput(session, "respWindow",      value    = params$respWindow)
+  updateNumericInput(session, "respWinPed",      value    = params$respWinPed)
+  updateNumericInput(session, "respTimesLength", value    = params$respTimesLength)
+  updateNumericInput(session, "minISI",          value    = params$minISI)
+  updateNumericInput(session, "fprate",          value    = params$fprate)
+  updateNumericInput(session, "fnrate",          value    = params$fnrate)
+  updateNumericInput(session, "refresh",         value    = params$refresh)
 }

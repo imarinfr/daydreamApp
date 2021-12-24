@@ -39,7 +39,11 @@ patientsUI <- function(id) {
   )
 }
 
-patients <- function(input, output, session) {
+patients <- function(input, output, session, envir) {
+  dayParams <- get("dayParams", envir = envir)
+  patientdbChanged <- get("patientdbChanged", envir = envir)
+  patientChanged   <- get("patientChanged", envir = envir)
+  patientTable     <- get("patientTable", envir = envir)
   ns <- session$ns
   psel <- reactive(!is.null(input$patientdb_rows_selected))
   newPatient <- FALSE
@@ -69,12 +73,12 @@ patients <- function(input, output, session) {
       enable("delPatient")
       disableMandatoryFields()
       showPatientFields()
-      fillPatientFields(session, input$patientdb_rows_selected)
-      patient <<- selectPatient(input$patientdb_rows_selected)
+      fillPatientFields(session, input$patientdb_rows_selected, patientTable)
+      assign("patient", selectPatient(input$patientdb_rows_selected, patientTable), envir = envir)
     } else {
       disable("delPatient")
       hidePatientFields()
-      patient <<- initPatient()
+      assign("patient", initPatient(), envir = envir)
     }
   }, ignoreInit = TRUE)
   # create new patient
@@ -96,16 +100,16 @@ patients <- function(input, output, session) {
   }, ignoreInit = TRUE)
   # confirm delete
   observeEvent(input$delok, {
-    deletePatient(input$patientdb_rows_selected)
+    patientTable <<- deletePatient(input$patientdb_rows_selected, envir, dayParams$dbPath, patientTable)
     patientdbChanged(TRUE)
     removeModal()
   }, ignoreInit = TRUE)
   # save patient
   observeEvent(input$save, { # save new patient
     if(newPatient) { # check if mandatory fields are not empty
-      checkRes <- checkNewPatient(input)
+      checkRes <- checkNewPatient(input, patientTable)
       if(checkRes$saveok) {
-        saveNewPatient(input)
+        patientTable <<- saveNewPatient(input, envir, dayParams$dbPath, patientTable)
         disableMandatoryFields()
         hidePatientFields()
         newPatient <<- FALSE
@@ -113,7 +117,7 @@ patients <- function(input, output, session) {
         patientdbChanged(TRUE)
       } else errorMessage(checkRes$errtxt)
     } else {
-      saveModifiedPatient(input)
+      patientTable <<- saveModifiedPatient(input, envir, dayParams$dbPath, patientTable)
       patientdbChanged(TRUE)
     }
   }, ignoreInit = TRUE)
@@ -172,7 +176,7 @@ fillRecord <- function(input) {
                     odcomments   = input$odcomments,
                     stringsAsFactors = FALSE))
 }
-fillPatientFields <- function(session, idx) {
+fillPatientFields <- function(session, idx, patientTable) {
   textFields <- c("id", "name", "surname", "type",
                   "osva", "osrx", "osoverrx", "odva", "odrx", "odoverrx",
                   "osdiagnostic", "oddiagnostic",
@@ -182,7 +186,7 @@ fillPatientFields <- function(session, idx) {
   updateRadioButtons(session, "gender", selected = patientTable$gender[idx])
 }
 # save new patient
-checkNewPatient <- function(input) {
+checkNewPatient <- function(input, patientTable) {
   saveok <- TRUE
   errtxt <- ""
   if(input$id          == "" ||
@@ -205,28 +209,34 @@ checkNewPatient <- function(input) {
   return(list(saveok = TRUE, errtxt = ""))
 }
 # save new patient
-saveNewPatient <- function(input) {
+saveNewPatient <- function(input, envir, path, patientTable) {
   df           <- fillRecord(input)
   df$created   <- format(Sys.time(), "%m/%d/%Y %H:%M:%S")
   df$modified  <- df$created
-  patientTable <<- rbind(patientTable, df)               # append new record
-  patientTable <<- patientTable[order(patientTable$id),] # sort data
-  save(patientTable, file = paste0(dayParams$dbPath, "patientdb.rda"))
+  patientTable <- rbind(patientTable, df) # append new record
+  patientTable <- patientTable[order(patientTable$id),] # sort data
+  save(patientTable, file = paste0(path, "patientdb.rda"))
+  load(paste0(path, "patientdb.rda"), envir = envir)
+  return(patientTable)
 }
 # save modified patient
-saveModifiedPatient <- function(input) {
+saveModifiedPatient <- function(input, envir, path, patientTable) {
   idx                <- input$patientdb_rows_selected         # idx of patient to modify
   df                 <- fillRecord(input)
   df$created         <- patientTable$created[idx]
   df$modified        <- format(Sys.time(), "%m/%d/%Y %H:%M:%S")
-  patientTable[idx,] <<- df                                    # modify record
-  patientTable       <<- patientTable[order(patientTable$id),] # sort data by ID
-  save(patientTable, file = paste0(dayParams$dbPath, "patientdb.rda"))
+  patientTable[idx,] <- df                                    # modify record
+  patientTable       <- patientTable[order(patientTable$id),] # sort data by ID
+  save(patientTable, file = paste0(path, "patientdb.rda"))
+  load(paste0(path, "patientdb.rda"), envir = envir)
+  return(patientTable)
 }
 # delete patient
-deletePatient <- function(idx) {
-  patientTable <<- patientTable[-idx,] # delete record
-  save(patientTable, file = paste0(dayParams$dbPath, "patientdb.rda"))
+deletePatient <- function(idx, envir, path, patientTable) {
+  patientTable <- patientTable[-idx,] # delete record
+  save(patientTable, file = paste0(path, "patientdb.rda"))
+  load(paste0(path, "patientdb.rda"), envir = envir)
+  return(patientTable)
 }
 # clear all data from fields
 clearPatientFields <- function(session) {
@@ -239,7 +249,7 @@ clearPatientFields <- function(session) {
   updateRadioButtons(session, "gender", choices = c("F", "M"), selected = character(), inline = TRUE)
 }
 # select patient
-selectPatient <- function(idx)
+selectPatient <- function(idx, patientTable)
   return(list(id      = patientTable$id[idx],
               name    = patientTable$name[idx],
               surname = patientTable$surname[idx],

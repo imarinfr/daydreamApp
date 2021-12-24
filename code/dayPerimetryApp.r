@@ -9,15 +9,19 @@ library(plotrix)
 library(deldir)
 library(sp)
 library(rgeos)
+library(txtq)
 library(callr)
 
-source("settings.r")
-source("gamma.r")
-source("patients.r")
-source("test.r")
-source("report.r")
-source("zesttests.r")
-source("pdfReport.r")
+source("settings.r",  local = TRUE)
+source("gamma.r",     local = TRUE)
+source("patients.r",  local = TRUE)
+source("test.r",      local = TRUE)
+source("report.r",    local = TRUE)
+source("zesttests.r", local = TRUE)
+source("pdfReport.r", local = TRUE)
+
+ShinySender   <- txtq(tempfile())  # Messages from GUI to test
+ShinyReceiver <- txtq(tempfile())  # Messages from test to GUI
 
 ui <- dashboardPage(
   dashboardHeader(title = "Daydream perimetry"),
@@ -35,32 +39,38 @@ ui <- dashboardPage(
 )
 
 server <- function(input, output, session) {
+  envir <- environment()
   # global variables
-  assign("settingsChanged",  reactiveVal(FALSE), envir = globalenv())
-  assign("patientChanged",   reactiveVal(FALSE), envir = globalenv())
-  assign("patientdbChanged", reactiveVal(FALSE), envir = globalenv())
-  assign("opiInitialized",   reactiveVal(FALSE), envir = globalenv())
-  assign("newReports",       reactiveVal(FALSE), envir = globalenv())
-  # check if global paramerter for daydream exist
+  assign("settingsChanged",  reactiveVal(FALSE))
+  assign("patientChanged",   reactiveVal(FALSE))
+  assign("patientdbChanged", reactiveVal(FALSE))
+  assign("opiInitialized",   reactiveVal(FALSE))
+  assign("newReports",       reactiveVal(FALSE))
+  # load global parameters dayParams, then the patient db, then the grids
   if(!file.exists("dayParams.rda"))
     stop("please create file dayParams.rda to start using the application")
-  # load global parameters dayParams
-  load("dayParams.rda", envir = globalenv())
+  load("dayParams.rda")
+  if(!file.exists(paste0(dayParams$dbPath, "patientdb.rda")))
+    stop("please create file patientdb.rda to start using the application")
+  load(paste0(dayParams$dbPath, "patientdb.rda"))
+  if(!file.exists(paste0(dayParams$confPath, "grids.rda")))
+    stop("please create file grids.rda to start using the application")
+  load(paste0(dayParams$confPath, "grids.rda"))
   # record structure where to store patient id, name, surname, and eye to test
-  assign("patient", list(id = NA, name = NA, surname = NA, age = NA, gender = NA, type = NA), envir = globalenv())
+  patient <- list(id = NA, name = NA, surname = NA, age = NA, gender = NA, type = NA)
   invisible(chooseOpi("Daydream")) # choose the Daydream as the OPI implementation
   # render all pages
-  settingsPage <- renderUI({settingsUI("settings")})
-  gammaPage    <- renderUI({gammaUI("gamma")})
+  settingsPage <- renderUI({settingsUI("settings", envir = envir)})
+  gammaPage    <- renderUI({gammaUI("gamma", envir = envir)})
   patientsPage <- renderUI({patientsUI("patients")})
-  testPage     <- renderUI({testUI("test")})
+  testPage     <- renderUI({testUI("test", envir = envir)})
   reportPage   <- renderUI({reportUI("report")})
   # start the modules
-  callModule(settings, "settings", session = session)
-  callModule(gamma,    "gamma",    session = session)
-  callModule(patients, "patients", session = session)
-  callModule(test,     "test",     session = session)
-  callModule(report,   "report",   session = session)
+  callModule(settings, "settings", envir = envir)
+  callModule(gamma,    "gamma",    envir = envir)
+  callModule(patients, "patients", envir = envir)
+  callModule(test,     "test",     envir = envir)
+  callModule(report,   "report",   envir = envir)
   browsePage <- "patientsPage"
   output$tab <- patientsPage
   ####################
@@ -79,8 +89,8 @@ server <- function(input, output, session) {
       enableAll()
       if(browsePage == "settingsPage") disable("settingsbtn")
       if(browsePage == "patientsPage") disable("patientsbtn")
-      load(paste0(dayParams$dbPath, "patientdb.rda"), envir = globalenv())
-      load(paste0(dayParams$confPath, "grids.rda"), envir = globalenv())
+      load(paste0(dayParams$dbPath, "patientdb.rda"))
+      load(paste0(dayParams$confPath, "grids.rda"))
       patientdbChanged(TRUE)
       newReports(TRUE)
     }
