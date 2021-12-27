@@ -1,7 +1,6 @@
-settingsUI <- function(id, envir) {
-  dayParams <- get("dayParams", envir = envir)
+settingsUI <- function(id) {
   # init gamma file choices and selection
-  choices  <- dir(dayParams$confPath, pattern = "*.csv")
+  choices  <- dir("../config/", pattern = "*.csv")
   selected <- ""
   if(length(choices) == 0) choices  <- "-"
   else if(dayParams$gammaFile %in% choices) selected <- dayParams$gammaFile
@@ -10,15 +9,10 @@ settingsUI <- function(id, envir) {
     fluidRow(
       column(4, textInput(ns("serverIP"), "Daydream IP", dayParams$serverIP)),
       column(4, textInput(ns("serverPort"), "Daydream port", dayParams$serverPort)),
-      column(4, textInput(ns("testPort"), "Test port", dayParams$testPort))
-    ),
-    fluidRow(
-      column(4, textInput(ns("dbPath"), "Database Path", dayParams$dbPath)),
       column(4, textInput(ns("resPath"), "Results path", dayParams$resPath)),
-      column(4, textInput(ns("confPath"), "Configuration path", dayParams$confPath)),
     ),
     fluidRow(
-      br(), br(),
+      br(),
       column(3, numericInput(ns("fovy"), "Field of view Y:", dayParams$fovy)),
       column(3, selectInput(ns("color"), "Stimulus color:", choices = c("white", "green", "red", "blue"), selected = dayParams$color)),
       column(3, numericInput(ns("bg"), "Background (cd/m2)", dayParams$bg)),
@@ -31,7 +25,7 @@ settingsUI <- function(id, envir) {
       column(3, numericInput(ns("maxarea"), "Max area (deg2)", dayParams$maxarea))
     ),
     fluidRow(
-      br(), br(),
+      br(),
       column(3, numericInput(ns("presTime"), "Pres time (ms):", dayParams$presTime)),
       column(3, numericInput(ns("respWindow"), "Resp window (ms):", dayParams$respWindow)),
       column(3, numericInput(ns("respWinPed"), "Resp pedestal (ms):", dayParams$respWinPed)),
@@ -47,16 +41,14 @@ settingsUI <- function(id, envir) {
       column(12, radioButtons(ns("runType"), "Run type", c("Luminance perimetry", "Size perimetry", "Simulation"), dayParams$runType, inline = TRUE))
     ),
     fluidRow(
-      br(), br(),
-      column(3, actionButton(ns("saveSettings"), "Save settings"), offset=3),
+      br(),
+      column(3, actionButton(ns("saveSettings"), "Save settings"), offset = 3),
       column(3, actionButton(ns("loadSettings"), "Load settings"))
     )
   )
 }
 
-settings <- function(input, output, session, envir) {
-  dayParams <- get("dayParams", envir = envir)
-  settingsChanged <- get("settingsChanged", envir = envir)
+settings <- function(input, output, session) {
   ####################
   # EVENTS
   ####################
@@ -70,28 +62,19 @@ settings <- function(input, output, session, envir) {
   })
   # check if input OK or not
   observeEvent(settingsChanged(), {
-    if(!file.exists(paste0(dayParams$dbPath, "patientdb.rda")) |
-       !file.exists(paste0(dayParams$confPath, "default.csv")) |
-       !file.exists(paste0(dayParams$confPath, "grids.rda"))   |
+    if(!file.exists("../db/patientdb.rda")   |
+       !file.exists("../config/default.csv") |
+       !file.exists("../config/grids.rda")   |
        !dir.exists(dayParams$resPath))
       errorMessage("Make sure the three folders exist and that there is a file called 'patientdb.rda' in the db path and two called 'default.csv' and 'grids.rda' in the configuration path")
   })
-  # update gamma files for selection
-  observeEvent(input$confPath, {
-    choices  <- dir(dayParams$confPath, pattern = "*.csv")
-    selected <- ""
-    if(length(choices) == 0) choices  <- "-"
-    else if(dayParams$gammaFile %in% choices) selected <- dayParams$gammaFile
-    updateSelectInput(session, "gammaFile", choices = choices, selected = selected)
-  })
   # save default values
   observeEvent(input$saveSettings, {
-    save(dayParams, file = "dayParams.rda")
+    save(dayParams, file = "../config/dayParams.rda")
   }, ignoreInit = TRUE)
   # load default values
   observeEvent(input$loadSettings, {
-    load("dayParams.rda", envir = envir)
-    dayParams <- get("dayParams", envir = envir)
+    load("../config/dayParams.rda", envir = globalenv())
     populateDefaults(session, dayParams)
   }, ignoreInit = TRUE)
 }
@@ -107,13 +90,10 @@ errorMessage <- function(txt) {
 }
 # populate screen fields with saved parameter values
 populateDefaults <- function(session, params) {
-  updateTextInput(session,    "dbPath",          value    = params$dbPath)
   updateTextInput(session,    "resPath",         value    = params$resPath)
-  updateTextInput(session,    "confPath",        value    = params$confPath)
   updateTextInput(session,    "gammaFile",       value    = params$gammaFile)
   updateTextInput(session,    "serverIP",        value    = params$serverIP)
   updateTextInput(session,    "serverPort",      value    = params$serverPort)
-  updateTextInput(session,    "testPort",        value    = params$testPort)
   updateNumericInput(session, "fovy",            value    = params$fovy)
   updateSelectInput(session,  "color",           selected = params$color)
   updateRadioButtons(session, "runType",         selected = params$runType)

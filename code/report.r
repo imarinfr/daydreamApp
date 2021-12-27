@@ -7,12 +7,7 @@ reportUI <- function(id) {
   )
 }
 
-report <- function(input, output, session, envir) {
-  dayParams    <- get("dayParams", envir = envir)
-  newReports   <- get("newReports", envir = envir)
-  patientTable <- get("patientTable", envir = envir)
-  gridNames    <- get("gridNames", envir = envir)
-  grids        <- get("grids", envir = envir)
+report <- function(input, output, session) {
   ns        <- session$ns
   psel      <- reactive(!is.null(input$records_rows_selected))
   perimetry <- NULL

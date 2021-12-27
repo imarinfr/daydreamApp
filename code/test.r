@@ -1,6 +1,4 @@
-testUI <- function(id, envir) {
-  dayParams <- get("dayParams", envir = envir)
-  gridNames <- get("gridNames", envir = envir)
+testUI <- function(id) {
   ns <- NS(id)
   tagList(
     fluidRow(
@@ -45,23 +43,14 @@ testUI <- function(id, envir) {
   )
 }
 
-test <- function(input, output, session, envir) {
-  dayParams <- get("dayParams", envir = envir)
-  patientChanged <- get("patientChanged", envir = envir)
-  opiInitialized <- get("opiInitialized", envir = envir)
-  gridNames      <- get("gridNames", envir = envir)
-  grids          <- get("grids", envir = envir)
-  patient        <- get("patient", envir = envir)
-  newReports     <- get("newReports", envir = envir)
-  debugrun   <- FALSE
+test <- function(input, output, session) {
   ns         <- session$ns
-  rs         <- NA    # R session
-  con        <- NA    # socket connection
   opiParams  <- NULL  # parameters to pass to OPI implementation
   size       <- 1.72  # stimulus size for Luminance perimetry
   lum        <- 400   # stimulus luminance for Size perimetry
   begin      <- TRUE  # whether the test is to start from beginning or after pause
   go         <- FALSE # keep going
+  opts       <- NULL  # running options
   locs       <- NULL  # test locations
   foveadb    <- NULL  # sensitivity value obtained at the fovea
   listen     <- reactiveTimer(1000 / dayParams$refresh) # from Hz to ms
@@ -86,7 +75,6 @@ test <- function(input, output, session, envir) {
   observe(
     if(patientChanged()) {
       patientChanged(FALSE)
-      patient <<- get("patient", envir = envir)
       output$selected <- renderUI(parsePatientOutput(patient))
     }
   )
@@ -108,11 +96,9 @@ test <- function(input, output, session, envir) {
     refreshout(TRUE)
   })
   observeEvent(input$eye, {
-    locs    <<- testLocations(grids, gridNames)
-    if(opiInitialized()) {
-      eye <- ifelse(input$eye == "OD", "R", "L")
-      rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg)))
-    }
+    locs <<- testLocations(grids, gridNames)
+    if(opiInitialized())
+      ShinySender$push(title = c("CMD", "eye"), message = c("opiBg", ifelse(input$eye == "OD", "R", "L")))
     foveadb <<- NA
     initRunVariables()
   })
@@ -134,73 +120,49 @@ test <- function(input, output, session, envir) {
   observeEvent(input$init, {
     if(is.na(patient$id)) errorMessage("Select a patient before proceeding")
     else {
+      ShinySender$reset()
+      ShinyReceiver$reset()
       disableElements(c("init", "serverIP"))
       opiParams <<- fillOpiParams(input$serverIP, dayParams)
-      tryCatch({
-        # start a new R session and change working directory to the same as this one
-        if(!debugrun) {
-          rs <<- r_session$new()
-          invisible({
-            # set working directory
-            rs$run(setwd, args = list(dir = getwd()))
-            # load the OPI library in background R session along with other required packages
-            rs$run(do.call, args = list(what = library, args = list(package = "OPI")))
-            rs$run(do.call, args = list(what = library, args = list(package = "deldir")))
-            rs$run(do.call, args = list(what = library, args = list(package = "sp")))
-            rs$run(do.call, args = list(what = library, args = list(package = "rgeos")))
-            # choose OPI in background R session
-            rs$run(do.call, args = list(what = chooseOpi, args = list(opiImplementation = chooseOpi()[.OpiEnv$chooser])))
-          })
-          # initialize OPI
-          rs$run(do.call, args = list(what = opiInitialize, args = opiParams))
-          eye <- ifelse(input$eye == "OD", "R", "L")
-          rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg)))
-          # assign 
-          rs$run(assign, args = list(x = "makePMF",     value = makePMF))
-          rs$run(assign, args = list(x = "openNewLocs", value = openNewLocs))
-          rs$run(assign, args = list(x = "findNeighbors", value = findNeighbors))
-        }
-        msg("OPI connection opened")
-        opiInitialized(TRUE)
-        showModal(modalDialog(title = "OPI connection", "OPI has been initialized", easyClose = TRUE))
-        enableElements(c("fovea", "close", "run"))
-      }, error = function(e) {
-        msg(errortxt(e))
-        opiInitialized(FALSE)
-        enableElements(c("init", "serverIP"))
-      })
+      machine   <- chooseOpi()[.OpiEnv$chooser]
+      showModal(modalDialog(title = "OPI connection", "Initializing OPI", footer = NULL))
+      source("zestserver.r", local = TRUE)
+      # initialize server
+      then(zestServer,
+           onFulfilled = function() print("done"),
+           onRejected = function(err) stop(err))
+      # initialize OPI server and change background eye
+      ShinySender$push(title = c("CMD", "eye"), message = c("opiInit", ifelse(input$eye == "OD", "R", "L")))
+      msg("OPI initialized")
+      opiInitialized(TRUE)
+      enableElements(c("fovea", "close", "run"))
       locs    <<- initLocations(locs)
       foveadb <<- NA
       initRunVariables()
+      removeModal()
       refreshout(TRUE)
     }
   }, ignoreInit = TRUE)
   # close OPI connection
   observeEvent(input$close, {
-    if(!debugrun) {
-      invisible(rs$run(opiClose))
-      rs$close()
-      rs <<- NA
-    }
     disableElements(c("close", "fovea", "run"))
     enableElements(c("init", "serverIP"))
-    msg("OPI connection closed")
+    ShinySender$push(title = "CMD", message = "opiClose")
+    msg("OPI closed")
     opiInitialized(FALSE)
-    locs    <<- testLocations(grids, gridNames)
+    ShinySender$reset()
+    ShinyReceiver$reset()
+    locs <<- initLocations(locs)
     foveadb <<- NA
     initRunVariables()
     refreshout(TRUE)
   }, ignoreInit = TRUE)
   # test fovea
   observeEvent(input$fovea, {
-    if(!debugrun) {
-      eye <- ifelse(input$eye == "OD", "R", "L")
-      rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg, fixation = "Circle", fix_sx = 3, fix_sy = 3)))
-    }
     showModal(modalDialog(
       title = "Start testing the fovea?",
       "Press Yes when ready or Cancel",
-      footer = tagList(actionButton(ns("okfovea"), "Yes"), actionButton(ns("cancelfovea"), "Cancel"))
+      footer = tagList(actionButton(ns("okfovea"), "Yes"), modalButton("Cancel"))
     ))
   }, ignoreInit = TRUE)
   # if OK to test fovea
@@ -208,38 +170,33 @@ test <- function(input, output, session, envir) {
     removeModal()
     showModal(modalDialog(title = "Testing the fovea", "Please wait while the fovea is being tested", footer = NULL))
     # run foveal test
-    if(!debugrun) {
-      eye <- ifelse(input$eye == "OD", "R", "L")
-      rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg, fixation = "Circle", fix_sx = 3, fix_sy = 3)))
-      foveadb <<- round(rs$run(fovealTest, args = list(eye = eye, bg = dayParams$bg, minlum = dayParams$minlum, maxlum = dayParams$maxlum, 
-                      color = dayParams$color, presTime = dayParams$presTime, respWin = dayParams$respWindow)))
-      rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg)))
-    }
+    ShinySender$push(title = c("CMD", "eye"), message = c("zestFovea", ifelse(input$eye == "OD", "R", "L")))
+    # wait for return message
+    while(ShinyReceiver$empty()) Sys.sleep(0.1)
+    foveadb <<- round(as.numeric(ShinyReceiver$pop()$message))
     removeModal()
-    showModal(modalDialog(title = "Testing the fovea", "Foveal test has finished", easyClose = TRUE))
     msg(paste("Foveal threshold is", foveadb, "dB"))
     refreshout(TRUE)
   }, ignoreInit = TRUE)
-  # if Cancel test fovea
-  observeEvent(input$cancelfovea, {
-    if(!debugrun) {
-      eye <- ifelse(input$eye == "OD", "R", "L")
-      rs$run(do.call, args = list(what = opiSetBackground, args = list(eye = eye, lum = dayParams$bg)))
-    }
-    removeModal()
-  })
   # start or continue test
   observeEvent(input$run, {
     if(begin) {
       locs <<- initLocations(locs)
       initRunVariables()
-      disableElements(c("eye", "size", "grid"))
+      disableElements(c("eye", "size", "lum", "grid"))
+      ShinySender$push(title   = c("CMD", "grid", "eye", "lum", "size"),
+                       message = c("zestInit", input$grid, ifelse(input$eye == "OD", "R", "L"), lum, size))
+      begin <<- FALSE
     }
-    runTest(dayParams)
+    disableElements(c("close", "run", "fovea", "stop", "save"))
+    enableElements(c("pause"))
+    msg("OPI ZEST test running")
+    go <<- TRUE
   }, ignoreInit = TRUE)
   # pause test halfway through
   observeEvent(input$pause, {
     if(!begin) { # if test has not started or it has finished, do not do this
+      ShinySender$push(title = "CMD", message = "zestPause")
       tp0 <<- Sys.time()
       go  <<- FALSE
       disableElements("pause")
@@ -252,17 +209,17 @@ test <- function(input, output, session, envir) {
     showModal(modalDialog(
       title = "Are you sure you want to terminate the test?",
       "Press TERMINATE to cancel",
-      footer = tagList(actionButton(ns("okstop"), "TERMINATE"), modalButton("Continue"))
+      footer = tagList(actionButton(ns("terminate"), "TERMINATE"), modalButton("Continue"))
     ))
   }, ignoreInit = TRUE)
-  # OK to stop halfway through?
-  observeEvent(input$okstop, { # stop test
+  # OK to terminate halfway through?
+  observeEvent(input$terminate, { # terminate test
     removeModal()
-    stopTest()
-    msg(errortxt(paste(dayParams$runType, "ZEST test terminated")))
-    enableElements(c("close", "run", "fovea", "eye", "size", "grid"))
+    msg(errortxt("OPI ZEST test TERMINATED"))
+    enableElements(c("close", "run", "fovea", "eye", "size", "lum", "grid"))
     disableElements(c("pause", "stop", "save"))
     begin   <<- TRUE
+    go      <<- FALSE
     locs    <<- initLocations(locs)
     foveadb <<- NA
     initRunVariables()
@@ -273,7 +230,7 @@ test <- function(input, output, session, envir) {
     saveResults(patient, dayParams$resPath, dayParams$runType, grids, gridNames)
     updateTextInput(session, "comments", value = "")
     disableElements(c("save", "cancel"))
-    enableElements(c("eye", "size", "grid", "fovea", "close", "run"))
+    enableElements(c("eye", "size", "lum", "grid", "fovea", "close", "run"))
     msg("Results have been saved")
     begin   <<- TRUE
     locs    <<- initLocations(locs)
@@ -286,7 +243,7 @@ test <- function(input, output, session, envir) {
   observeEvent(input$cancel, { # do not save and allow to run a fresh test
     updateTextInput(session, "comments", value = "")
     disableElements(c("save", "cancel"))
-    enableElements(c("eye", "size", "grid", "fovea", "close", "run"))
+    enableElements(c("eye", "size", "lum", "grid", "fovea", "close", "run"))
     msg(errortxt("Results have not been saved"))
     begin   <<- TRUE
     locs    <<- initLocations(locs)
@@ -300,51 +257,26 @@ test <- function(input, output, session, envir) {
   observe({ # refresh at a fast rate (similar to a loop)
     listen() # timer for the listener
     if(go) {
-      npress <- ifelse(is.null(runlog), 1, nrow(runlog))
-      writeBin("NEXT", con) # send NEXT command
-      res <<- readFromSocket()
-      # update locations
-      idx <- which(locs$x == res$x & locs$y == res$y)
-      locs$th[idx] <<- res$th
-      locs$done[idx]  <<- res$done
-      runlog <<- rbind(runlog, updateLog(res))
-      # check and show if a catch trial needs to be presented
-      if(npress %% dayParams$fprate == 0) { # false positive trial
-        idx <- sample(1:nrow(locs), 1) # get random location
-        writeBin("FALS", con) # send FALS command
-        if(dayParams$runType != "Size perimetry") {
-          size <- 0  # ignore size
-          db   <- 50 # very dim stimulus, corresponds to light differential of 11 * 1e-4 cd/m2 if max luminance is 110
-        } else {
-          size <- 0.01 # very small stimulus size
-          db   <- 0    # ignore db
+      # go for it, then read results
+      ShinySender$push(title = "CMD", message = "zestStep")
+      res <<- readResults()
+      # if fail (can happen when trying to run a FP catch trial), then move along
+      if(res$type != "F") {
+        # update locations
+        if(res$type == "Z") {
+          idx <- which(locs$x == res$x & locs$y == res$y)
+          locs$th[idx]    <<- res$th
+          locs$done[idx]  <<- res$done
         }
-        # send catch trial and retrieve results
-        sendCatchTrialData(locs$x[idx], locs$y[idx], size, db)
-        res <- readFromSocket()
-        # update log
         runlog <<- rbind(runlog, updateLog(res))
-      } else if(npress %% dayParams$fnrate == 0) { # false negative trial
-        # get all locations that for which at least a stimulus double the background luminance has been seen
-        logfn <- runlog[runlog$level >= log10(dayParams$maxlum / dayParams$bg) & runlog$seen == TRUE,]
-        if(nrow(logfn) > 0) {
-          writeBin("FALS", con) # send FALS command
-          idx <- sample(logfn$level, 1) # get one at random
-          # send catch trial and retrieve results: brightest or largest stimulus,
-          # ignore size if luminance perimetry or luminance is size perimetry
-          sendCatchTrialData(logfn$x[idx], logfn$y[idx], dayParams$maxarea, 0)
-          res <- readFromSocket()
-          res$level <- -50
-          # update log
-          runlog <<- rbind(runlog, updateLog(res))
-        }
+        # update results
+        refreshout(TRUE)
       }
-      # update results
-      refreshout(TRUE)
       # if all points are done, stop perimetry test
       if(all(locs$done)) {
-        msg(paste(dayParams$runType, "ZEST test finished"))
-        stopTest()
+        msg(paste("ZEST test finished"))
+        ShinySender$push(title = "CMD", message = "zestPause")
+        go    <<- FALSE
         begin <<- TRUE
         enableElements(c("fovea", "save", "cancel"))
         disableElements(c("run", "pause", "stop", "close"))
@@ -365,62 +297,19 @@ test <- function(input, output, session, envir) {
     if(input$eye == "OS") locs$x <- -locs$x
     return(initLocations(locs))
   }
-  # run Test
-  runTest <- function(params) {
-    go    <<- TRUE
-    begin <<- FALSE
-    # if connection has not been established yet, do it
-    if(is.na(con)) {
-      if(!debugrun) {
-        if(params$runType == "Size perimetry") type <- "size"
-        else type <- "luminance"
-        opts <- list(size = size, lum = lum, color = params$color, bg = params$bg,
-                     minlum = params$minlum, maxlum = params$maxlum,
-                     minarea = params$minarea, maxarea = params$maxarea,
-                     presTime = params$presTime, respWindow = params$respWindow, respWinPed = params$respWinPed, 
-                     respTimesLength = params$respTimesLength, minISI = params$minISI)
-        eye <- ifelse(input$eye == "OD", "R", "L")
-        rs$call(zestTest, args = list(type = type, eye = eye, locs = locs[, c("x", "y", "wave")], opts = opts, port = dayParams$testPort))
-        if(!is.null(rsread <- rs$read())) print(rsread$stdout)
-      }
-      # start client
-      con <<- socketConnection(port = params$testPort, server = FALSE, open = "")
-      # loop until can open the connection. Connection is open so that execution
-      # is blocked when waiting for perimetry test server to respond
-      while(tryCatch({open(con, open = "w+b"); FALSE},
-                     error   = function(cond) TRUE,
-                     warning = function(cond) TRUE)) {}
-    }
-    disableElements(c("close", "run", "fovea", "stop", "save"))
-    enableElements(c("pause"))
-    msg(paste(params$runType, "ZEST test running"))
-  }
-  # stop test
-  stopTest <- function() {
-    go <<- FALSE
-    if(!is.na(con)) {
-      writeBin("STOP", con) # send STOP command
-      if(!debugrun) while(is.null(rs$read())) {}
-      close(con) # close client connection
-      con <<- NA
-    }
-  }
-  readFromSocket <- function() {
-    # read results returned by perimetry test process through socket
-    x     <- readBin(con, "numeric") # stimulus x coordinate
-    y     <- readBin(con, "numeric") # stimulus y coordinate
-    level <- readBin(con, "numeric") # stimulus level
-    th    <- readBin(con, "numeric") # estimated threshold
-    seen  <- readBin(con, "logical") # seen or not seen
-    time  <- readBin(con, "numeric") # response time
-    done  <- readBin(con, "logical") # whether we are done testing the location
-    return(data.frame(x = x, y = y, level = level, th = th, seen = seen, time = time, done = done))
-  }
-  sendCatchTrialData <- function(x, y, size, db) {
-    writeBin(as.numeric(x),    con)
-    writeBin(as.numeric(y),    con)
-    writeBin(as.numeric(size), con)
-    writeBin(as.numeric(db),   con)
+  readResults <- function() {
+    while(ShinyReceiver$empty()) Sys.sleep(0.01)
+    vals <- ShinyReceiver$pop(ShinyReceiver$count())$message
+    # read results returned by ZEST test
+    return(data.frame(type   = vals[1],
+                      x      = as.numeric(vals[2]),
+                      y      = as.numeric(vals[3]),
+                      level  = as.numeric(vals[4]),
+                      th     = round(as.numeric(vals[5])),
+                      seen   = as.logical(vals[6]),
+                      time   = as.numeric(vals[7]),
+                      resWin = as.numeric(vals[8]),
+                      done   = as.logical(vals[9])))
   }
   # update log
   updateLog <- function(res) {
@@ -437,6 +326,7 @@ test <- function(input, output, session, envir) {
       y      = res$y,
       level  = res$level,
       th     = res$th,
+      type   = res$type,
       seen   = res$seen,
       time   = res$time,
       done   = res$done,
@@ -492,12 +382,12 @@ fillOpiParams <- function(serverIP, params) {
     # and use the values in DayParams settings for initialization parameters
     opiParams$ip   <- serverIP
     opiParams$port <- params$serverPort
-    opiParams$lut  <- read.csv(paste0(params$confPath, params$gammaFile), header = FALSE)$V1
+    opiParams$lut  <- read.csv(paste0("../config/", params$gammaFile), header = FALSE)$V1
     opiParams$fovy <- params$fovy
   } else {
-    #chooseOpi("SimHenson")
+    chooseOpi("SimHenson")
     #chooseOpi("SimYes")
-    chooseOpi("SimNo")
+    #chooseOpi("SimNo")
     opiParams <- opiGetParams("opiInitialize")
   }
   return(opiParams)
@@ -576,22 +466,18 @@ renderResult <- function(locs, res, runlog) {
   nfinished <- sum(locs$done)    # locations finished
   if(!is.null(runlog)) {
     # compute false positives and negatives
-    fp  <- sum(runlog$level == 50 & runlog$seen)
-    fpt <- sum(runlog$level == 50)
+    fp  <- sum(runlog$type == "P" & runlog$seen)
+    fpt <- sum(runlog$type == "P")
     fpp <- ifelse(fpt == 0, 0, round(100 * fp / fpt))
-    fn  <- sum(runlog$level == -50 & !runlog$seen)
-    fnt <- sum(runlog$level == -50)
+    fn  <- sum(runlog$type == "N" & !runlog$seen)
+    fnt <- sum(runlog$type == "N")
     fnp <- ifelse(fnt == 0, 0, round(100 * fn / fnt))
     # compute response time SD and mean
-    rt <- runlog$time[which(runlog$seen == TRUE)]
-    if (length(rt) > 1) { #can only calculate SD if there are more than 2 response times available
+    rt <- runlog$time[which(runlog$type == "Z" & runlog$seen == TRUE)]
+    if (length(rt) > 1) { # can only calculate SD if there are more than 2 response times available
+      rtm  <- round(mean(rt))
       rtsd <- round(sd(rt))
-      rtm <- round(mean(rt))
-    } else if (length(rt) == 1) {
-      rtm <- round(mean(rt))
-    } else {
-      rtsd <- rtm <- ""
-    }
+    } else rtsd <- rtm <- ""
     # calculate test time and pause time
     secs <- runlog$tt[length(runlog$tt)]
     mm <- as.character(secs %/% 60)
@@ -621,14 +507,14 @@ renderResult <- function(locs, res, runlog) {
   txt <- paste(txt, "<strong>False Negatives:</strong>", fn, "of", fnt)
   txt <- paste0(txt, " (", fnp, "%)<br/><br/>")
   # Response Times
-  txt <- paste(txt, "<strong>Responses < 150 ms:</strong>", sum(runlog$time < 150), "<br/>")
-  txt <- paste(txt, "<strong>Responses > 600 ms:</strong>", sum(runlog$time > 600 & runlog$seen == TRUE), "<br/>")
+  txt <- paste(txt, "<strong>Responses < 150 ms:</strong>", sum(runlog$type == "Z" & runlog$time < 150), "<br/>")
+  txt <- paste(txt, "<strong>Responses > 600 ms:</strong>", sum(runlog$type == "Z" & runlog$time > 600 & runlog$seen == TRUE), "<br/>")
   txt <- paste(txt, "<strong>Mean Response Time:</strong>", rtm, "<br/>")
   txt <- paste(txt, "<strong>SD of Response Time:</strong>", rtsd, "<br/><br/>")
   # Progress
   txt <- paste(txt, "<strong>Finished:</strong>", nfinished, "of", npoints)
   txt <- paste0(txt, " (", round(100 * nfinished / npoints), "%)<br/>")
-  txt <- paste(txt, "<strong>Presentations:</strong>", nrow(runlog) - sum(runlog$level < 0), "<br/><br/>")
+  txt <- paste(txt, "<strong>Presentations:</strong>", sum(runlog$type == "Z"), "<br/><br/>")
   # test time and pause time
   txt <- paste(txt, "<strong>Test Time (mm:ss):</strong>",  tttxt, "<br/>")
   txt <- paste(txt, "<strong>Pause Time (mm:ss):</strong>", tptxt, "<br/>")
@@ -639,9 +525,10 @@ renderResult <- function(locs, res, runlog) {
 # prepare results to save
 prepareToSave <- function(id, eye, tdate, ttime, age, type, comments, locs, runlog, foveadb) {
   res <- data.frame(id = id, eye = eye, date = tdate, time = ttime, age = age, type = type, fpr = NA, fnr = NA,
-                    rt150 = sum(runlog$time < 150), rt600 = sum(runlog$time > 600 & runlog$seen == TRUE), rtsd = NA, rtm = NA,
-                    duration = NA, pause = NA, npres = nrow(runlog) - sum(runlog$level < 0), comments = comments,
-                    fovea = ifelse(is.na(foveadb), "", foveadb)) # do not count catch trials
+                    rt150 = sum(runlog$type == "Z" & runlog$time < 150),
+                    rt600 = sum(runlog$type == "Z" & runlog$time > 600 & runlog$seen == TRUE),
+                    rtsd = NA, rtm = NA, duration = NA, pause = NA, npres = sum(runlog$type == "Z"),
+                    comments = comments, fovea = ifelse(is.na(foveadb), "", foveadb))
   
   # test and pause time
   secs <- runlog$tt[length(runlog$tt)]
@@ -657,20 +544,17 @@ prepareToSave <- function(id, eye, tdate, ttime, age, type, comments, locs, runl
   if(nchar(ss) == 1) ss <- paste0("0", ss)
   res$pause <- paste(mm, ss, sep = ":")
   # false positive and false negatives
-  fp  <- sum(runlog$level == 50 & runlog$seen)
-  fpt <- sum(runlog$level == 50)
+  fp  <- sum(runlog$type == "P" & runlog$seen)
+  fpt <- sum(runlog$type == "P")
   res$fpr <- ifelse(fpt == 0, 0, fp / fpt)
-  fn  <- sum(runlog$level == -50 & !runlog$seen)
-  fnt <- sum(runlog$level == -50)
+  fn  <- sum(runlog$type == "N" & !runlog$seen)
+  fnt <- sum(runlog$type == "N")
   res$fnr <- ifelse(fnt == 0, 0, fn / fnt)
   # compute response time SD and mean
-  rt <- runlog$time[which(runlog$seen == TRUE)]
+  rt <- runlog$time[which(runlog$type == "Z" & runlog$seen == TRUE)]
   res$rtsd <- round(sd(rt))
   res$rtm <- round(mean(rt))
-  # get levels at each location to compute stats and scores and save
-  runlog <- runlog[runlog$done == TRUE,]
-  final_threshold <- runlog$th
-  # results for each location
-  res[,paste0("l", 1:nrow(locs))] <- final_threshold
+  # get results for each location
+  res[,paste0("l", 1:nrow(locs))] <- runlog$th[runlog$type == "Z" & runlog$done == TRUE]
   return(res)
 }

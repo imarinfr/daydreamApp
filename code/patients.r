@@ -12,7 +12,7 @@ patientsUI <- function(id) {
       column(5, align = "center", hidden(disabled(textInput(ns("surname"), "Surname"))))
     ),
     fluidRow(
-      column(3, align = "center", hidden(disabled(dateInput(ns("dob"), "Date of Birth", format = "yyyy-mm-dd")))),
+      column(3, align = "center", hidden(dateInput(ns("dob"), "Date of Birth", format = "yyyy-mm-dd"))),
       column(2, align = "center", hidden(textInput(ns("type"), "Type"))),
       column(2, align = "center", hidden(radioButtons(ns("gender"), "Gender", choices = c("F", "M"), selected = character(0), inline = TRUE)))
     ),
@@ -39,11 +39,7 @@ patientsUI <- function(id) {
   )
 }
 
-patients <- function(input, output, session, envir) {
-  dayParams <- get("dayParams", envir = envir)
-  patientdbChanged <- get("patientdbChanged", envir = envir)
-  patientChanged   <- get("patientChanged", envir = envir)
-  patientTable     <- get("patientTable", envir = envir)
+patients <- function(input, output, session) {
   ns <- session$ns
   psel <- reactive(!is.null(input$patientdb_rows_selected))
   newPatient <- FALSE
@@ -74,11 +70,11 @@ patients <- function(input, output, session, envir) {
       disableMandatoryFields()
       showPatientFields()
       fillPatientFields(session, input$patientdb_rows_selected, patientTable)
-      assign("patient", selectPatient(input$patientdb_rows_selected, patientTable), envir = envir)
+      patient <<- selectPatient(input$patientdb_rows_selected, patientTable)
     } else {
       disable("delPatient")
       hidePatientFields()
-      assign("patient", initPatient(), envir = envir)
+      patient <<- initPatient()
     }
   }, ignoreInit = TRUE)
   # create new patient
@@ -100,7 +96,7 @@ patients <- function(input, output, session, envir) {
   }, ignoreInit = TRUE)
   # confirm delete
   observeEvent(input$delok, {
-    patientTable <<- deletePatient(input$patientdb_rows_selected, envir, dayParams$dbPath, patientTable)
+    patientTable <<- deletePatient(input$patientdb_rows_selected, patientTable)
     patientdbChanged(TRUE)
     removeModal()
   }, ignoreInit = TRUE)
@@ -109,7 +105,7 @@ patients <- function(input, output, session, envir) {
     if(newPatient) { # check if mandatory fields are not empty
       checkRes <- checkNewPatient(input, patientTable)
       if(checkRes$saveok) {
-        patientTable <<- saveNewPatient(input, envir, dayParams$dbPath, patientTable)
+        patientTable <<- saveNewPatient(input, patientTable)
         disableMandatoryFields()
         hidePatientFields()
         newPatient <<- FALSE
@@ -117,7 +113,7 @@ patients <- function(input, output, session, envir) {
         patientdbChanged(TRUE)
       } else errorMessage(checkRes$errtxt)
     } else {
-      patientTable <<- saveModifiedPatient(input, envir, dayParams$dbPath, patientTable)
+      patientTable <<- saveModifiedPatient(input, patientTable)
       patientdbChanged(TRUE)
     }
   }, ignoreInit = TRUE)
@@ -153,9 +149,9 @@ hidePatientFields <- function()
            "save", "cancel"), hideElement)
 # enable or disable fields
 enableMandatoryFields <- function()
-  lapply(c("id", "name", "surname", "dob"), enable)
+  lapply(c("id", "name", "surname"), enable)
 disableMandatoryFields <- function()
-  lapply(c("id", "name", "surname", "dob"), disable)
+  lapply(c("id", "name", "surname"), disable)
 # fill record with patient data
 fillRecord <- function(input) {
   return(data.frame(id           = input$id,
@@ -198,44 +194,40 @@ checkNewPatient <- function(input, patientTable) {
   } else if(input$id %in% patientTable$id) {
     # check that there is no other record with the same ID
     return(list(saveok = FALSE, errtxt = "Duplicated ID number"))
-  } else if(input$id %in% patientTable$id) { # for same id, name, surname, and dob needs to be same
+  } else if(input$id %in% patientTable$id) { # for same id, name, and surname needs to be same
     idx <- which(patientTable$id == input$id)
-    if(input$name    != patientTable$name[idx]                     ||
-       input$surname != patientTable$surname[idx]                  ||
-       input$dob     != as.Date(patientTable$dob[idx], "%d/%m/%Y")) {
+    if(input$name    != patientTable$name[idx] ||
+       input$surname != patientTable$surname[idx]) {
       return(list(saveok = FALSE, errtxt = "Records with the same ID must have the same Name, Surname, and Date of Birth"))
     }
   }
   return(list(saveok = TRUE, errtxt = ""))
 }
 # save new patient
-saveNewPatient <- function(input, envir, path, patientTable) {
+saveNewPatient <- function(input, patientTable) {
   df           <- fillRecord(input)
   df$created   <- format(Sys.time(), "%m/%d/%Y %H:%M:%S")
   df$modified  <- df$created
   patientTable <- rbind(patientTable, df) # append new record
   patientTable <- patientTable[order(patientTable$id),] # sort data
-  save(patientTable, file = paste0(path, "patientdb.rda"))
-  load(paste0(path, "patientdb.rda"), envir = envir)
+  save(patientTable, file = "../db/patientdb.rda")
   return(patientTable)
 }
 # save modified patient
-saveModifiedPatient <- function(input, envir, path, patientTable) {
+saveModifiedPatient <- function(input, patientTable) {
   idx                <- input$patientdb_rows_selected         # idx of patient to modify
   df                 <- fillRecord(input)
   df$created         <- patientTable$created[idx]
   df$modified        <- format(Sys.time(), "%m/%d/%Y %H:%M:%S")
   patientTable[idx,] <- df                                    # modify record
   patientTable       <- patientTable[order(patientTable$id),] # sort data by ID
-  save(patientTable, file = paste0(path, "patientdb.rda"))
-  load(paste0(path, "patientdb.rda"), envir = envir)
+  save(patientTable, file = "../db/patientdb.rda")
   return(patientTable)
 }
 # delete patient
-deletePatient <- function(idx, envir, path, patientTable) {
+deletePatient <- function(idx, patientTable) {
   patientTable <- patientTable[-idx,] # delete record
-  save(patientTable, file = paste0(path, "patientdb.rda"))
-  load(paste0(path, "patientdb.rda"), envir = envir)
+  save(patientTable, file = "../db/patientdb.rda")
   return(patientTable)
 }
 # clear all data from fields

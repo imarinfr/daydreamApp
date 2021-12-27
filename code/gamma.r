@@ -1,5 +1,4 @@
-gammaUI <- function(id, envir) {
-  dayParams <- get("dayParams", envir = envir)
+gammaUI <- function(id) {
   ns <- NS(id)
   tagList(
     fluidRow(
@@ -35,15 +34,12 @@ gammaUI <- function(id, envir) {
   )
 }
 
-gamma <- function(input, output, session, envir) {
-  dayParams <- get("dayParams", envir = envir)
-  opiInitialized <- get("opiInitialized", envir = envir)
-  debugrun <- FALSE
+gamma <- function(input, output, session) {
   ns <- session$ns
   eye <- NULL
   lutTable <- NULL
   lutFit <- data.frame(pix = 0:255, lum = 0)
-  roots <- c("config" = dayParams$confPath, "wd" = ".", "home" = "~")
+  roots <- c("config" = "../config/", "wd" = ".", "home" = "~")
   makeReactiveBinding("lutTable")
   # messages for status o connection, etc
   msg <- reactiveVal("Press 'Initialize OPI' to start")
@@ -56,12 +52,12 @@ gamma <- function(input, output, session, envir) {
   ####################
   # initialize OPI
   observeEvent(input$init, {
-    opiParams <- fillOpiParams(input$serverIP, dayParams$runType)
-    opiParams$lut <- 0:255 # LUT is pixel value itself for testing purposes
-    if(!debugrun) {
-      do.call(opiInitialize, opiParams)
+    opiParams <- fillOpiParams(input$serverIP, dayParams)
+    if(dayParams$runType != "Simulation")
+      opiParams$lut <- 0:255 # LUT is pixel value itself for testing purposes
+    do.call(opiInitialize, opiParams)
+    if(dayParams$runType != "Simulation")
       do.call(opiSetBackground, list(eye = eye, lum = 0, fix_sx = 0, fix_sy = 0))
-    }
     msg("OPI connection opened")
     disable("init")
     enable("close")
@@ -74,7 +70,7 @@ gamma <- function(input, output, session, envir) {
   }, ignoreInit = TRUE)
   # close OPI connection
   observeEvent(input$close, {
-    if(!debugrun) opiClose()
+    opiClose()
     msg("OPI connection closed")
     enable("init")
     disable("close")
@@ -88,7 +84,7 @@ gamma <- function(input, output, session, envir) {
   # change eye
   observeEvent(input$eye, {
     eye <<- ifelse(input$eye == "OD", "R", "L")
-    if(opiInitialized() & !debugrun)
+    if(opiInitialized() & dayParams$runType != "Simulation")
       do.call(opiSetBackground, list(eye = eye, lum = 0, fix_sx = 0, fix_sy = 0))
   })
   # update fields from pixel level to keep segments consistent
@@ -96,7 +92,7 @@ gamma <- function(input, output, session, envir) {
   observeEvent(input$to2, updateNumericInput(session, "fr3", value = input$to2))
   # select row
   observeEvent(input$lut_select$select$r, {
-    if(opiInitialized() & !debugrun)
+    if(opiInitialized() & dayParams$runType != "Simulation")
       do.call(opiSetBackground, list(eye = eye, lum = lutTable$pix[input$lut_select$select$r], fix_sx = 0, fix_sy = 0))
   }, ignoreInit = TRUE)
   # observe changes edit

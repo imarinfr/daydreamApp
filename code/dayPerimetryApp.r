@@ -6,22 +6,41 @@ library(shinyFiles)
 library(rhandsontable)
 library(DT)
 library(plotrix)
-library(deldir)
-library(sp)
-library(rgeos)
 library(txtq)
-library(callr)
+library(future)
+library(promises)
+# prepare to run processes in parallel
+plan(multisession)
+# remove all threads at the end of all things
+onStop(function() plan(sequential))
 
 source("settings.r",  local = TRUE)
 source("gamma.r",     local = TRUE)
 source("patients.r",  local = TRUE)
 source("test.r",      local = TRUE)
 source("report.r",    local = TRUE)
-source("zesttests.r", local = TRUE)
 source("pdfReport.r", local = TRUE)
 
-ShinySender   <- txtq(tempfile())  # Messages from GUI to test
-ShinyReceiver <- txtq(tempfile())  # Messages from test to GUI
+# global variables
+settingsChanged  <- reactiveVal(FALSE)
+patientChanged   <- reactiveVal(FALSE)
+patientdbChanged <- reactiveVal(FALSE)
+opiInitialized   <- reactiveVal(FALSE)
+newReports       <- reactiveVal(FALSE)
+patient          <- list(id = NA, name = NA, surname = NA, age = NA, gender = NA, type = NA)
+ShinySender      <- txtq(tempfile())  # Messages from GUI to test
+ShinyReceiver    <- txtq(tempfile())  # Messages from test to GUI
+
+# load global parameters dayParams, then the patient db, then the grids
+if(!file.exists("../config/dayParams.rda"))
+  stop("please create file dayParams.rda to start using the application")
+load("../config/dayParams.rda")
+if(!file.exists("../config/grids.rda"))
+  stop("please create file grids.rda to start using the application")
+load("../config/grids.rda")
+if(!file.exists("../db/patientdb.rda"))
+  stop("please create file patientdb.rda to start using the application")
+load("../db/patientdb.rda")
 
 ui <- dashboardPage(
   dashboardHeader(title = "Daydream perimetry"),
@@ -39,38 +58,19 @@ ui <- dashboardPage(
 )
 
 server <- function(input, output, session) {
-  envir <- environment()
-  # global variables
-  assign("settingsChanged",  reactiveVal(FALSE))
-  assign("patientChanged",   reactiveVal(FALSE))
-  assign("patientdbChanged", reactiveVal(FALSE))
-  assign("opiInitialized",   reactiveVal(FALSE))
-  assign("newReports",       reactiveVal(FALSE))
-  # load global parameters dayParams, then the patient db, then the grids
-  if(!file.exists("dayParams.rda"))
-    stop("please create file dayParams.rda to start using the application")
-  load("dayParams.rda")
-  if(!file.exists(paste0(dayParams$dbPath, "patientdb.rda")))
-    stop("please create file patientdb.rda to start using the application")
-  load(paste0(dayParams$dbPath, "patientdb.rda"))
-  if(!file.exists(paste0(dayParams$confPath, "grids.rda")))
-    stop("please create file grids.rda to start using the application")
-  load(paste0(dayParams$confPath, "grids.rda"))
-  # record structure where to store patient id, name, surname, and eye to test
-  patient <- list(id = NA, name = NA, surname = NA, age = NA, gender = NA, type = NA)
   invisible(chooseOpi("Daydream")) # choose the Daydream as the OPI implementation
   # render all pages
-  settingsPage <- renderUI({settingsUI("settings", envir = envir)})
-  gammaPage    <- renderUI({gammaUI("gamma", envir = envir)})
+  settingsPage <- renderUI({settingsUI("settings")})
+  gammaPage    <- renderUI({gammaUI("gamma")})
   patientsPage <- renderUI({patientsUI("patients")})
-  testPage     <- renderUI({testUI("test", envir = envir)})
+  testPage     <- renderUI({testUI("test")})
   reportPage   <- renderUI({reportUI("report")})
   # start the modules
-  callModule(settings, "settings", envir = envir)
-  callModule(gamma,    "gamma",    envir = envir)
-  callModule(patients, "patients", envir = envir)
-  callModule(test,     "test",     envir = envir)
-  callModule(report,   "report",   envir = envir)
+  callModule(settings, "settings")
+  callModule(gamma,    "gamma")
+  callModule(patients, "patients")
+  callModule(test,     "test")
+  callModule(report,   "report")
   browsePage <- "patientsPage"
   output$tab <- patientsPage
   ####################
@@ -78,9 +78,9 @@ server <- function(input, output, session) {
   ####################
   # check setting parameters have changed
   observeEvent(settingsChanged(), {
-    if(!file.exists(paste0(dayParams$dbPath, "patientdb.rda")) |
-       !file.exists(paste0(dayParams$confPath, "default.csv")) |
-       !file.exists(paste0(dayParams$confPath, "grids.rda"))   |
+    if(!file.exists("../db/patientdb.rda") |
+       !file.exists("../config/default.csv") |
+       !file.exists("../config/grids.rda")   |
        !dir.exists(dayParams$resPath)) {
       browsePage <<- "settingsPage"
       output$tab <<- settingsPage
@@ -89,8 +89,8 @@ server <- function(input, output, session) {
       enableAll()
       if(browsePage == "settingsPage") disable("settingsbtn")
       if(browsePage == "patientsPage") disable("patientsbtn")
-      load(paste0(dayParams$dbPath, "patientdb.rda"))
-      load(paste0(dayParams$confPath, "grids.rda"))
+      load("../db/patientdb.rda")
+      load("../config/grids.rda")
       patientdbChanged(TRUE)
       newReports(TRUE)
     }
@@ -139,6 +139,8 @@ server <- function(input, output, session) {
     disable("reportbtn")
     lapply(c("settingsbtn", "gammabtn", "patientsbtn", "testbtn"), enable)
   })
+  # close OPI server
+  onSessionEnded(function() ShinySender$push(title = "CMD", message = "opiClose"))
 }
 ####################
 # ROUTINES
