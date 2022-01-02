@@ -4,7 +4,6 @@ gammaUI <- function(id) {
     fluidRow(
       column(6,
         column(7, textInput(ns("serverIP"), "Server IP", dayParams$serverIP)),
-        column(5, selectInput(ns("eye"), "Eye", choices = c("OD", "OS"))),
         column(7, numericInput(ns("nreps"), "Repetitions", 3, min = 1, max = 3)),
         column(12, htmlOutput(ns("msgconn")))
       ),
@@ -36,9 +35,8 @@ gammaUI <- function(id) {
 
 gamma <- function(input, output, session) {
   ns <- session$ns
-  eye <- NULL
   lutTable <- NULL
-  lutFit <- data.frame(pix = 0:255, lum = 0)
+  lutFit <- NULL
   roots <- c("config" = "../config/", "wd" = ".", "home" = "~")
   makeReactiveBinding("lutTable")
   # messages for status o connection, etc
@@ -52,12 +50,12 @@ gamma <- function(input, output, session) {
   ####################
   # initialize OPI
   observeEvent(input$init, {
-    opiParams <- fillOpiParams(input$serverIP, dayParams)
-    if(dayParams$runType != "Simulation")
+    opiParams <- fillOpiParams(input$serverIP)
+    if(dayParams$machine == "Daydream" | dayParams$machine == "Display")
       opiParams$lut <- 0:255 # LUT is pixel value itself for testing purposes
-    do.call(opiInitialize, opiParams)
-    if(dayParams$runType != "Simulation")
-      do.call(opiSetBackground, list(eye = eye, lum = 0, fix_sx = 0, fix_sy = 0))
+    do.call(what = opiInitialize, args = opiParams)
+    if(dayParams$machine == "Daydream" | dayParams$machine == "Display")
+      do.call(opiSetBackground, list(eye = "B", lum = 0, fix_sx = 0, fix_sy = 0))
     msg("OPI connection opened")
     disable("init")
     enable("close")
@@ -81,19 +79,13 @@ gamma <- function(input, output, session) {
     output$plotlut <- NULL
     opiInitialized(FALSE)
   }, ignoreInit = TRUE)
-  # change eye
-  observeEvent(input$eye, {
-    eye <<- ifelse(input$eye == "OD", "R", "L")
-    if(opiInitialized() & dayParams$runType != "Simulation")
-      do.call(opiSetBackground, list(eye = eye, lum = 0, fix_sx = 0, fix_sy = 0))
-  })
   # update fields from pixel level to keep segments consistent
   observeEvent(input$to1, updateNumericInput(session, "fr2", value = input$to1))
   observeEvent(input$to2, updateNumericInput(session, "fr3", value = input$to2))
   # select row
   observeEvent(input$lut_select$select$r, {
-    if(opiInitialized() & dayParams$runType != "Simulation")
-      do.call(opiSetBackground, list(eye = eye, lum = lutTable$pix[input$lut_select$select$r], fix_sx = 0, fix_sy = 0))
+    if(opiInitialized() & (dayParams$machine == "Daydream" | dayParams$machine == "Display"))
+      do.call(opiSetBackground, list(eye = "B", lum = lutTable$pix[input$lut_select$select$r], fix_sx = 0, fix_sy = 0))
   }, ignoreInit = TRUE)
   # observe changes edit
   observeEvent(input$lut$changes$changes, {
@@ -104,27 +96,21 @@ gamma <- function(input, output, session) {
     # rework fitted data
     fitlong <- reshape(lutTable, direction = "long", idvar = "pix", varying = 2:ncol(lutTable), sep = "")[,c(1,3)]
     fitlong <- fitlong[!is.na(fitlong$lum),] # keep only valid data
-    fit <- tryCatch(nls(lum ~ SSlogis(pix, Asym, xmid, scal), data = fitlong), error = function(e) NULL)
-    if(!is.null(fit)) {
-      xmin <- min(fitlong$pix)
-      xmax <- max(fitlong$pix)
-      lutFit <<- NULL
-      if(xmin > 0) lutFit <<- data.frame(pix = 0:(xmin - 1), lum = 0)
-      lutFit <<- rbind(lutFit, data.frame(pix = xmin:xmax, lum = predict(fit, data.frame(pix = xmin:xmax))))
-      if(xmax < 255) lutFit <<- rbind(lutFit, data.frame(pix = (xmax + 1):255, lum = 0))
-    }
+    lutFit  <<- tryCatch(as.data.frame(predict(smooth.spline(fitlong), x = min(fitlong$pix):max(fitlong$pix))), error = function(e) NULL)
+    lutFit$y[lutFit$y < 0] <<- 0
+    print(lutFit)
   })
   shinyFileSave(input, "save", roots = roots)
   observeEvent(input$save, {
     fname <- parseSavePath(roots, input$save)$datapath
-    if(length(fname) > 0) write.table(lutFit$lum, file = fname, sep = ",", row.names = FALSE, col.names = FALSE)
+    if(length(fname) > 0) write.table(lutFit$y, file = fname, sep = ",", row.names = FALSE, col.names = FALSE)
   }, ignoreInit = TRUE)
 }
 # disable and enable all fields
 disableAll <- function()
-  lapply(c("serverIP", "eye", "nreps", "by1", "to1", "by2", "to2", "by3"), disable)
+  lapply(c("serverIP", "nreps", "by1", "to1", "by2", "to2", "by3"), disable)
 enableAll <- function()
-  lapply(c("serverIP", "eye", "nreps", "by1", "to1", "by2", "to2", "by3"), enable)
+  lapply(c("serverIP", "nreps", "by1", "to1", "by2", "to2", "by3"), enable)
 # generate LUT table
 generateLUTtable <- function(nreps, fr1, by1, to1, by2, to2, by3, to3) {
   lutTable <- data.frame(pix = unique(c(seq(fr1, to1, by = by1), seq(to1, to2, by = by2), seq(to2, to3, by = by3))))
@@ -135,14 +121,14 @@ generateLUTtable <- function(nreps, fr1, by1, to1, by2, to2, by3, to3) {
 }
 # plot LUT results so far
 lutPlot <- function(lutTable, lutFit) {
-  pix <- lutTable$pix
+  pix     <- lutTable$pix
   lum     <- apply(lutTable[,2:ncol(lutTable)], 1, mean, na.rm = TRUE) # mean
   lum2sem <- 2 * apply(lutTable[,2:ncol(lutTable)], 1, sd, na.rm = TRUE) / sqrt(ncol(lutTable) - 1) # 2 SEM
   lum2sem[is.nan(lum2sem)] <- 0
   par(mar = c(8, 4, 6, 1))
   plot(0, 0, typ = "n", xlim = c(0, 255), ylim = c(0, 400),
        panel.first = grid(), xlab = "pixel value", ylab = "luminance (cd/m2)")
-  lines(lutFit$pix, lutFit$lum, col = "red")
+  lines(lutFit$x, lutFit$y, col = "red")
   arrows(pix, lum - lum2sem, pix, lum + lum2sem, length = 0, angle = 90)
   points(pix, lum, pch = 21, bg = "white")
 }

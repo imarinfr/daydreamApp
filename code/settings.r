@@ -7,41 +7,49 @@ settingsUI <- function(id) {
   ns <- NS(id)
   tagList(
     fluidRow(
-      column(4, textInput(ns("serverIP"), "Daydream IP", dayParams$serverIP)),
-      column(4, textInput(ns("serverPort"), "Daydream port", dayParams$serverPort)),
-      column(4, textInput(ns("resPath"), "Results path", dayParams$resPath)),
+      h3("Perimetry type"),
+      column(4, selectInput(ns("machine"),  "OPI implementation", choices = c("Daydream", "Display", "SimHenson", "SimYes", "SimNo"), selected = dayParams$machine)),
+      column(4, radioButtons(ns("runType"), "Perimetry type", c("luminance", "size"), dayParams$runType, inline = TRUE)),
+      column(4, textInput(ns("resPath"),    "Results path", dayParams$resPath)),
     ),
     fluidRow(
-      br(),
-      column(3, numericInput(ns("fovy"), "Field of view Y:", dayParams$fovy)),
-      column(3, selectInput(ns("color"), "Stimulus color:", choices = c("white", "green", "red", "blue"), selected = dayParams$color)),
-      column(3, numericInput(ns("bg"), "Background (cd/m2)", dayParams$bg)),
-      column(3, selectInput(ns("gammaFile"), "Gamma file:", choices = choices, selected = selected))
+      column(6,
+        h3("Daydream parameters"),
+        column(6, textInput(ns("serverIP"), "Daydream IP",      dayParams$serverIP)),
+        column(6, numericInput(ns("fovy"),  "Field of view Y:", dayParams$fovy))
+      ),
+      column(6,
+        h3("Display parameters"),
+        column(4, numericInput(ns("dimx"),    "num pix x", "1024")),
+        column(4, numericInput(ns("dimy"),    "num pix y", "800")),
+        column(4, numericInput(ns("pixsize"), "pix size",  "1"))
+      )
     ),
     fluidRow(
-      column(3, numericInput(ns("minlum"), "Min lum (cd/m2)",  dayParams$minlum)),
-      column(3, numericInput(ns("maxlum"), "Max lum (cd/m2)",  dayParams$maxlum)),
-      column(3, numericInput(ns("minarea"), "Min area (deg2)", dayParams$minarea)),
-      column(3, numericInput(ns("maxarea"), "Max area (deg2)", dayParams$maxarea))
+      h3("Stimulus parameters"),
+      column(3, numericInput(ns("bg"),       "Background", dayParams$bg)),
+      column(3, selectInput(ns("color"),     "Stimulus color:", choices = c("white", "green", "red", "blue"), selected = dayParams$color)),
+      column(6, selectInput(ns("gammaFile"), "Gamma file:", choices = choices, selected = selected)),
     ),
     fluidRow(
-      br(),
-      column(3, numericInput(ns("presTime"), "Pres time (ms):", dayParams$presTime)),
-      column(3, numericInput(ns("respWindow"), "Resp window (ms):", dayParams$respWindow)),
-      column(3, numericInput(ns("respWinPed"), "Resp pedestal (ms):", dayParams$respWinPed)),
-      column(3, numericInput(ns("respTimesLength"), "Resp list length", dayParams$respTimesLength)),
+      column(3, numericInput(ns("minlum"),  "Min luminance",  dayParams$minlum)),
+      column(3, numericInput(ns("maxlum"),  "Max luminance",  dayParams$maxlum)),
+      column(3, numericInput(ns("minarea"), "Min area",       dayParams$minarea)),
+      column(3, numericInput(ns("maxarea"), "Max area",       dayParams$maxarea))
+    ),
+    h3("ZEST parameters"),
+    fluidRow(
+      column(3, numericInput(ns("presTime"),        "Pres time (ms):",     dayParams$presTime)),
+      column(3, numericInput(ns("respWindow"),      "Resp window (ms):",   dayParams$respWindow)),
+      column(3, numericInput(ns("respWinPed"),      "Resp pedestal (ms):", dayParams$respWinPed)),
+      column(3, numericInput(ns("respTimesLength"), "Resp list length",    dayParams$respTimesLength)),
     ),
     fluidRow(
       column(3, numericInput(ns("minISI"), "min ISI (ms):", dayParams$minISI)),
       column(3, numericInput(ns("fprate"), "FP catch rate", dayParams$fprate)),
-      column(3, numericInput(ns("fnrate"), "FN catch rate", dayParams$fnrate)),
-      column(3, numericInput(ns("refresh"), "Refresh rate (Hz)", dayParams$refresh))
+      column(3, numericInput(ns("fnrate"), "FN catch rate", dayParams$fnrate))
     ),
     fluidRow(
-      column(12, radioButtons(ns("runType"), "Run type", c("Luminance perimetry", "Size perimetry", "Simulation"), dayParams$runType, inline = TRUE))
-    ),
-    fluidRow(
-      br(),
       column(3, actionButton(ns("saveSettings"), "Save settings"), offset = 3),
       column(3, actionButton(ns("loadSettings"), "Load settings"))
     )
@@ -55,6 +63,8 @@ settings <- function(input, output, session) {
   # if any input has changed, then update dayParams
   lapply(names(dayParams), function(par) {
     observeEvent(input[[par]], {
+      if(substr(input[["machine"]], 1, 3) == "Sim")
+        updateRadioButtons(session, "runType", selected = "luminance")
       dayParams[[par]] <<- input[[par]]
       settingsChanged(FALSE)
       settingsChanged(TRUE)
@@ -62,11 +72,10 @@ settings <- function(input, output, session) {
   })
   # check if input OK or not
   observeEvent(settingsChanged(), {
-    if(!file.exists("../db/patientdb.rda")   |
-       !file.exists("../config/default.csv") |
-       !file.exists("../config/grids.rda")   |
-       !dir.exists(dayParams$resPath))
-      errorMessage("Make sure the three folders exist and that there is a file called 'patientdb.rda' in the db path and two called 'default.csv' and 'grids.rda' in the configuration path")
+    if(!dir.exists(dayParams$resPath))
+      errorMessage("Make sure the folder for the results exists")
+    if(substr(dayParams$machine, 1, 3) == "Sim")
+      dayParams$machine <- "Simulation"
   })
   # save default values
   observeEvent(input$saveSettings, {
@@ -74,8 +83,8 @@ settings <- function(input, output, session) {
   }, ignoreInit = TRUE)
   # load default values
   observeEvent(input$loadSettings, {
-    load("../config/dayParams.rda", envir = globalenv())
-    populateDefaults(session, dayParams)
+    load("../config/dayParams.rda", envir = environment(server))
+    populateDefaults(session)
   }, ignoreInit = TRUE)
 }
 ####################
@@ -89,28 +98,27 @@ errorMessage <- function(txt) {
     easyClose = TRUE))
 }
 # populate screen fields with saved parameter values
-populateDefaults <- function(session, params) {
-  updateTextInput(session,    "resPath",         value    = params$resPath)
-  updateTextInput(session,    "gammaFile",       value    = params$gammaFile)
-  updateTextInput(session,    "serverIP",        value    = params$serverIP)
-  updateTextInput(session,    "serverPort",      value    = params$serverPort)
-  updateNumericInput(session, "fovy",            value    = params$fovy)
-  updateSelectInput(session,  "color",           selected = params$color)
-  updateRadioButtons(session, "runType",         selected = params$runType)
-  updateNumericInput(session, "bg",              value    = params$bg)
-  updateNumericInput(session, "minlum",          value    = params$minlum)
-  updateNumericInput(session, "maxlum",          value    = params$maxlum)
-  updateNumericInput(session, "minarea",         value    = params$minarea)
-  updateNumericInput(session, "maxarea",         value    = params$maxarea)
-  updateNumericInput(session, "maxPres",         value    = params$maxPres)
-  updateSelectInput(session,  "stopType",        selected = params$stopType)
-  updateNumericInput(session, "stopValue",       value    = params$stopValue)
-  updateNumericInput(session, "presTime",        value    = params$presTime)
-  updateNumericInput(session, "respWindow",      value    = params$respWindow)
-  updateNumericInput(session, "respWinPed",      value    = params$respWinPed)
-  updateNumericInput(session, "respTimesLength", value    = params$respTimesLength)
-  updateNumericInput(session, "minISI",          value    = params$minISI)
-  updateNumericInput(session, "fprate",          value    = params$fprate)
-  updateNumericInput(session, "fnrate",          value    = params$fnrate)
-  updateNumericInput(session, "refresh",         value    = params$refresh)
+populateDefaults <- function(session) {
+  updateTextInput(session,    "resPath",         value    = dayParams$resPath)
+  updateTextInput(session,    "gammaFile",       value    = dayParams$gammaFile)
+  updateTextInput(session,    "serverIP",        value    = dayParams$serverIP)
+  updateNumericInput(session, "fovy",            value    = dayParams$fovy)
+  updateSelectInput(session,  "color",           selected = dayParams$color)
+  updateSelectInput(session,  "machine",         selected = dayParams$machine)
+  updateRadioButtons(session, "runType",         selected = dayParams$runType)
+  updateNumericInput(session, "bg",              value    = dayParams$bg)
+  updateNumericInput(session, "minlum",          value    = dayParams$minlum)
+  updateNumericInput(session, "maxlum",          value    = dayParams$maxlum)
+  updateNumericInput(session, "minarea",         value    = dayParams$minarea)
+  updateNumericInput(session, "maxarea",         value    = dayParams$maxarea)
+  updateNumericInput(session, "maxPres",         value    = dayParams$maxPres)
+  updateSelectInput(session,  "stopType",        selected = dayParams$stopType)
+  updateNumericInput(session, "stopValue",       value    = dayParams$stopValue)
+  updateNumericInput(session, "presTime",        value    = dayParams$presTime)
+  updateNumericInput(session, "respWindow",      value    = dayParams$respWindow)
+  updateNumericInput(session, "respWinPed",      value    = dayParams$respWinPed)
+  updateNumericInput(session, "respTimesLength", value    = dayParams$respTimesLength)
+  updateNumericInput(session, "minISI",          value    = dayParams$minISI)
+  updateNumericInput(session, "fprate",          value    = dayParams$fprate)
+  updateNumericInput(session, "fnrate",          value    = dayParams$fnrate)
 }

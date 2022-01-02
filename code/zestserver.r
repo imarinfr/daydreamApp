@@ -61,7 +61,7 @@ openNewLocs <- function (neighbors, loc, locs, unfinished, finished) {
 }
 # helper to make stimulus
 prepareZestRun <- function(params, eye, size, lum) {
-  if(params$runType == "Luminance perimetry") { # Luminance perimetry
+  if(params$runType == "luminance") { # Luminance perimetry
     makeStimHelper <- function(x, y) { # returns a function of (db, n)
       ff <- function(db, n) db + n
       body(ff) <- substitute({
@@ -93,12 +93,12 @@ prepareZestRun <- function(params, eye, size, lum) {
       }, list(x = x, y = y))
       return(ff)
     }
-  } else if(params$runType == "Size perimetry") { # size
+  } else if(params$runType == "size") { # size
     makeStimHelper <- function(x, y) { # returns a function of (db, n)
       ff <- function(db, n) db + n
       body(ff) <- substitute({
         s <- list(x = x, y = y, eye = eye,
-                  level = lum,
+                  level = params$bg + lum,
                   size  = 2 * sqrt(params$maxarea * 10^(-db / 10) / pi),
                   color = params$color, duration = params$presTime,
                   responseWindow = params$respWindow)
@@ -118,38 +118,6 @@ prepareZestRun <- function(params, eye, size, lum) {
       body(ff) <- substitute({
         s <- list(x = x, y = y, eye = eye,
                   level = params$bg, size = 0,
-                  color = params$color, duration = params$presTime,
-                  responseWindow = params$respWindow)
-        class(s) <- "opiStaticStimulus"
-        return(s)
-      }, list(x = x, y = y))
-      return(ff)
-    }
-  } else if(params$runType == "Simulation") { # Simulation same as luminance
-    makeStimHelper <- function(x, y) { # returns a function of (db, n)
-      ff <- function(db, n) db + n
-      body(ff) <- substitute({
-        s <- list(x = x, y = y, eye = eye,
-                  level = params$maxlum * 10^(-db / 10),
-                  size  = size,
-                  color = params$color, duration = params$presTime,
-                  responseWindow = params$respWindow)
-        class(s) <- "opiStaticStimulus"
-        return(s)
-      }, list(x = x, y = y))
-      return(ff)
-    }
-    # domain
-    domain <- -5:(round(10 * log10(params$maxlum / params$minlum)) + 5)
-    prior_pmf <- makePMF(domain, 30)
-    minStim <- head(domain,1) + 5
-    maxStim <- tail(domain,1) - 5
-    # stimulus maker for false positive trials
-    makeStimHelperFP <- function(x, y) { # returns a function of (db)
-      ff <- function(db) db
-      body(ff) <- substitute({
-        s <- list(x = x, y = y, eye = eye,
-                  level = dbTocd(50), size = 0,
                   color = params$color, duration = params$presTime,
                   responseWindow = params$respWindow)
         class(s) <- "opiStaticStimulus"
@@ -184,7 +152,7 @@ zestServer <- future({
   ##########################################################################################################
   # foveal ZEST test
   fovealTest <- function() {
-    if(dayParams$runType != "Simulation")
+    if(dayParams$machine == "Daydream" | dayParams$machine == "Display")
       makeStimHelper <- function() { # returns a function of (db, n)
         ff <- function(db, n) db + n
         body(ff) <- substitute({
@@ -234,7 +202,7 @@ zestServer <- future({
     else loc <- sample(unfinished, 1, prob = weight)
     sr <- ZEST.step(states[[loc]])  # present stimulus and obtain response
     states[[loc]] <<- sr$state      # update state
-    if(ZEST.stop(states[[loc]])) { # remove terminated location from queue
+    if(ZEST.stop(states[[loc]])) {  # remove terminated location from queue
       ii <- which(unfinished == loc)
       unfinished <<- unfinished[-ii]
       finished <<- c(loc, finished)
@@ -252,13 +220,15 @@ zestServer <- future({
       }
     }
     # wait if necessary
-    if(dayParams$runType != "Simulation" && sr$resp$seen) {
+    if(sr$resp$seen) {
       if(sr$resp$time > 150) {
         respWin <<- c(sr$resp$time, respWin[-tail(respWin,1)]) # update recent response times vector
         dayParams$respWindow <<- round(dayParams$respWinPed + mean(respWin)) # update response window
       }
-      Sys.sleep(runif(1, min = dayParams$minISI, max = max(dayParams$minISI, mean(respWin))) / 1000)
+      if(substr(dayParams$machine, 1, 3) != "Sim")
+        Sys.sleep(runif(1, min = dayParams$minISI, max = max(dayParams$minISI, mean(respWin))) / 1000)
     }
+    if(substr(dayParams$machine, 1, 3) == "Sim") Sys.sleep(0.5)
     return(list(type = "Z", x = locs$x[loc], y = locs$y[loc],
                 level   = tail(sr$state$stimuli, 1),
                 th      = ZEST.final(sr$state),
@@ -266,7 +236,6 @@ zestServer <- future({
                 time    = sr$resp$time,
                 respWin = dayParams$respWindow,
                 done    = ZEST.stop(states[[loc]])))
-    return(sr)
   }
   zestTestCatchTrial <- function(type) {
     if(type == "P") {
@@ -275,12 +244,10 @@ zestServer <- future({
       level <- 0
     }
     if(type == "N") {
-      if(dayParams$runType == "Luminance perimetry")
+      if(dayParams$runType == "luminance")
         thr <- 2 * dayParams$bg
-      else if(dayParams$runType == "Size perimetry")
+      else if(dayParams$runType == "size")
         thr <- 2 * dayParams$minarea
-      else if(dayParams$runType == "Simulation")
-        thr <- 2 * dayParams$bg
       # check seen responses
       respseen <- lapply(states, function(ss) return(ss$stimuli[ss$responses]))
       # that are a greater value than the threshold
@@ -304,35 +271,65 @@ zestServer <- future({
   # Main algorithm
   ##########################################################################################################
   repeat{
-    # if command is idle, then wait for instructions
-    while(ShinySender$empty()) Sys.sleep(0.01)
-    cmd <- readCommand(ShinySender)
+    # listen for instructions from the GUI. If command is opiWait, then wait a bit,
+    # otherwise, go ahead
+    if(!ShinySender$empty()) cmd <- readCommand(ShinySender)
+    else if(cmd == "opiWait") Sys.sleep(0.1)
+    else Sys.sleep(0.01) # let the system breath
+    ################
+    # OPI INITIALIZE
+    ################
     if(cmd == "opiInit") {
-      chooseOpi(machine)
-      do.call(what = opiInitialise, args = opiParams)
+      # choose OPI
+      if(!chooseOPI(dayParams$machine)) {
+        ShinyReceiver$push("ERR", "chooseOPI failed")
+        stop("chooseOPI failed")
+      }
+      msg <- tryCatch(do.call(what = opiInitialise, args = opiParams), error = function(e) e$message)
+      if(!is.null(msg)) {
+        ShinyReceiver$push("ERR", msg)
+        stop(msg)
+      }
       # get eye from message
       eye <- ShinySender$pop()$message
-      if(machine == "Daydream")
-        do.call(what = opiSetBackground,
-                args = list(eye = eye, lum = dayParams$bg, color = dayParams$color))
+      if(dayParams$machine == "Daydream")
+        if (!is.null(opiSetBackground(eye = eye, lum = dayParams$bg, color = dayParams$color))) {
+          ShinyReceiver$push("ERR", "opiSetBackground failed")
+          stop("opiInitialise failed")
+        }
+      ShinyReceiver$push("OK", "OPI initialized")
+      cmd <- "opiWait"
     }
+    ################
+    # OPI CLOSE
+    ################
     if(cmd == "opiClose") {
       opiClose()
+      ShinyReceiver$push("OK", "OPI closed")
       break
     }
+    ################
+    # OPI BACKGROUND
+    ################
     if(cmd == "opiBg") {
       # get eye from message
       eye <- ShinySender$pop()$message
-      if(machine == "Daydream")
-        do.call(what = opiSetBackground,
-                args = list(eye = eye, lum = dayParams$bg, color = dayParams$color))
+      if(dayParams$machine == "Daydream")
+        if (!is.null(opiSetBackground(eye = eye, lum = dayParams$bg, color = dayParams$color))) {
+          ShinyReceiver$push("ERR", "opiSetBackground failed")
+          stop("opiSetBackground failed")
+        }
+      cmd <- "opiWait"
     }
+    ################
+    # OPI ZEST INIT
+    ################
     if(cmd == "zestInit") {
       # get eye, size, and luminance from messages
       grid <- ShinySender$pop()$message
       eye  <- ShinySender$pop()$message
-      size <- ShinySender$pop()$message
-      lum  <- ShinySender$pop()$message
+      lum  <- as.numeric(ShinySender$pop()$message)
+      size <- as.numeric(ShinySender$pop()$message)
       locs <- grids[[which(gridNames %in% grid)]]
       if(eye == "L") locs$x <- -locs$x
       zestopt <- prepareZestRun(dayParams, eye, size, lum)
@@ -344,47 +341,59 @@ zestServer <- future({
                    maxPresentations = 100,
                    makeStim  = zestopt$makeStimHelper(locs$x[i], locs$y[i])))
       # vector of locations with unfinished ZEST business
-      unfinished <- as.numeric(row.names(locs[which(locs$wave == 1),])) #start with wave 1 primary locations
+      unfinished <- which(locs$wave == 1)
       finished <- NULL
-      # set up loop variables and source external functions
-      respWin <- rep(dayParams$respWindow, dayParams$respTimesLength)  # set up adaptive response window
+      # set up adaptive response window
+      respWin <- rep(dayParams$respWindow, dayParams$respTimesLength)
       npress <- 0 # reset number of presentations to zero
+      cmd <- "opiWait"
     }
-    if(cmd == "zestStep") {
-      npress <- npress + 1 # get number of presentations so far
-      # check if it is time for a positive catch trial
-      # FP = false positive trials
-      # FN = false negative trials
-      # N  = normal trial
-      if(npress %% dayParams$fprate == 0)
-        writeResults(ShinyReceiver, zestTestCatchTrial("P")) 
-      else if(npress %% dayParams$fnrate == 0)
-        writeResults(ShinyReceiver, zestTestCatchTrial("N"))
-      else
-        writeResults(ShinyReceiver, zestTest())
+    ################
+    # OPI ZEST STEP
+    ################
+    if(cmd == "zestRun") {
+      # check if there is a request to pause
+      if(!ShinySender$empty() && ShinySender$pop()$message == "opiWait")
+        cmd <- "opiWait"
+      else {
+        # check if it is time for a positive catch trial
+        # FP = false positive trials
+        # FN = false negative trials
+        # N  = normal trial
+        npress <- npress + 1 # get number of presentations so far
+        if(npress %% dayParams$fprate == 0)
+          writeResults(ShinyReceiver, zestTestCatchTrial("P")) 
+        else if(npress %% dayParams$fnrate == 0)
+          writeResults(ShinyReceiver, zestTestCatchTrial("N"))
+        else
+          writeResults(ShinyReceiver, zestTest())
+        if(length(unfinished) == 0) cmd <- "opiWait"
+      }
     }
-    if(cmd == "zestPause") Sys.sleep(0.25)
+    ################
+    # OPI FOVEA
+    ################
     if(cmd == "zestFovea") {
       # get eye from message
       eye <- ShinySender$pop()$message
       # change background for Foveal test and wait for 1 seconds
-      if(machine == "Daydream") {
+      if(dayParams$machine == "Daydream") {
         do.call(what = opiSetBackground,
-                args = list(eye = eye, lum = dayParams$bg, color = dayParams$color,
+                args = list(eye = "B", lum = dayParams$bg, color = dayParams$color,
                             fixation = "Circle", fix_sx = 3, fix_sy = 3))
         Sys.sleep(1)
       }
       ShinyReceiver$push(title = "VAL", message = as.character(fovealTest()))
       # return back to regular background
-      if(machine == "Daydream")
+      if(dayParams$machine == "Daydream")
         do.call(what = opiSetBackground,
-                args = list(eye = eye, lum = dayParams$bg, color = dayParams$color))
+                args = list(eye = "B", lum = dayParams$bg, color = dayParams$color))
+      cmd <- "opiWait"
     }
   }
 },
 seed = TRUE,
-globals = list(machine        = machine,
-               dayParams      = dayParams,
+globals = list(dayParams      = dayParams,
                opiParams      = opiParams,
                grids          = grids,
                gridNames      = gridNames,
