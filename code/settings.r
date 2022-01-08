@@ -20,9 +20,9 @@ settingsUI <- function(id) {
       ),
       column(6,
         h3("Display parameters"),
-        column(4, numericInput(ns("dimx"),    "num pix x", "1024")),
-        column(4, numericInput(ns("dimy"),    "num pix y", "800")),
-        column(4, numericInput(ns("pixsize"), "pix size",  "1"))
+        column(4, numericInput(ns("height"),   "width cm", 32)),
+        column(4, numericInput(ns("width"),    "height cm", 20)),
+        column(4, numericInput(ns("viewdist"), "distance",  50))
       )
     ),
     fluidRow(

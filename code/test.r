@@ -259,7 +259,7 @@ test <- function(input, output, session) {
   observe({
     listen()
     if(!ShinyReceiver$empty()) {
-      res <<- rbind(res, updateLog(readResults()))
+      res <<- rbind(res, updateRes(readResults()))
       # update results
       refreshout(TRUE)
       # if all points are done, stop perimetry test
@@ -314,7 +314,7 @@ test <- function(input, output, session) {
     return(dat)
   }
   # update log
-  updateLog <- function(dat) {
+  updateRes <- function(dat) {
     # update test and pause times
     if(tp0 != 0) {
       tp <<- tp + as.numeric(difftime(Sys.time(), tp0, units = "secs"))
@@ -375,6 +375,9 @@ fillOpiParams <- function(serverIP) {
     opiParams$fovy <- dayParams$fovy
   } else if(dayParams$machine == "Display") {
     # TODO: implement Display
+    opiParams$xlim <- dayParams$xlim
+    opiParams$ylim <- dayParams$xlim
+    opiParams$bg   <- dayParams$bg
   }
   return(opiParams)
 }
@@ -444,7 +447,7 @@ renderResult <- function(locs, res) {
     x     <- paste(tail(res, 1)$x, "degrees")
     y     <- paste(tail(res, 1)$y, "degrees")
     time  <- tail(res, 1)$time
-    if(tail(res, 1)$seen) seentxt <- "Stimulus <strong>seen</strong>"
+    if(tail(res$seen, 1)) seentxt <- "Stimulus <strong>seen</strong>"
     else         seentxt <- "Stimulus <strong>not seen</strong>"
     seentxt <- paste(seentxt, "after", round(time), "ms")
   }

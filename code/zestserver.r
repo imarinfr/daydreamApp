@@ -147,6 +147,7 @@ writeResults <- function(q, res) {
 }
 # ZEST server for foveal test, zest test, etc.
 zestServer <- future({
+  set.seed(Sys.time())
   ##########################################################################################################
   # Define help functions
   ##########################################################################################################
@@ -240,24 +241,31 @@ zestServer <- future({
   zestTestCatchTrial <- function(type) {
     if(type == "P") {
       idx <- sample(1:nrow(locs), 1) # get random location
-      res <- opiPresent(zestopt$makeStimHelperFP(locs$x[idx], locs$y[idx])(0))
-      level <- 0
+      level <- round(-10 * log10(0.001 / 400))
+      res <- opiPresent(zestopt$makeStimHelperFP(locs$x[idx], locs$y[idx])(level))
     }
     if(type == "N") {
       if(dayParams$runType == "luminance")
-        thr <- 2 * dayParams$bg
+        # threshold is 100% of contrast sensitivity
+        thr <- round(-10 * log10(dayParams$bg / dayParams$maxlum))       # TODO: CRITERION NEEDS TO BE REVISED
       else if(dayParams$runType == "size")
-        thr <- 2 * dayParams$minarea
+        thr <- round(-10 * log10(dayParams$minarea / dayParams$maxarea)) # TODO: CRITERION NEEDS TO BE REVISED
       # check seen responses
       respseen <- lapply(states, function(ss) return(ss$stimuli[ss$responses]))
       # that are a greater value than the threshold
       idx <- which(sapply(respseen, function(rr) return(any(rr >= thr))))
       # if no point found, no N catch trial and ignore completely
-      if(length(idx) == 0) return(list(type = "F", x = NA, y = NA, level = NA, th = NA,
+      if(length(idx) == 0) {
+        return(list(type = "F", x = NA, y = NA, level = NA, th = NA,
                                        seen = NA, time = NA, respWin = NA,done = NA))
+      }
       idx <- sample(idx, 1) # get one at random
       level <- 0 # maximum luminance and maximum size for false negatives
       res   <- opiPresent(zestopt$makeStimHelper(locs$x[idx], locs$y[idx])(level))
+      if(is.na(res$seen)) {
+        print(zestopt$makeStimHelper(locs$x[idx], locs$y[idx])(level))
+        print(res)
+      }
     }
     return(list(type = type, x = locs$x[idx], y = locs$y[idx],
                 level   = level,
@@ -265,7 +273,7 @@ zestServer <- future({
                 seen    = res$seen,
                 time    = res$time,
                 respWin = 0,
-                done    = FALSE))
+                done    = NA))
   }
   ##########################################################################################################
   # Main algorithm

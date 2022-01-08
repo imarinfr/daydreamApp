@@ -36,7 +36,7 @@ gammaUI <- function(id) {
 gamma <- function(input, output, session) {
   ns <- session$ns
   lutTable <- NULL
-  lutFit <- NULL
+  lutFit <- data.frame(x = 0:255, y = 0)
   roots <- c("config" = "../config/", "wd" = ".", "home" = "~")
   makeReactiveBinding("lutTable")
   # messages for status o connection, etc
@@ -62,6 +62,7 @@ gamma <- function(input, output, session) {
     showElement("save")
     disableAll()
     lutTable <<- generateLUTtable(input$nreps, input$fr1, input$by1, input$to1, input$by2, input$to2, input$by3, input$to3)
+    lutFit   <<- data.frame(x = 0:255, y = 0)
     output$lut <- renderRHandsontable(handsontable(lutTable))
     output$plotlut <- renderPlot(lutPlot(lutTable, lutFit))
     opiInitialized(TRUE)
@@ -96,9 +97,15 @@ gamma <- function(input, output, session) {
     # rework fitted data
     fitlong <- reshape(lutTable, direction = "long", idvar = "pix", varying = 2:ncol(lutTable), sep = "")[,c(1,3)]
     fitlong <- fitlong[!is.na(fitlong$lum),] # keep only valid data
-    lutFit  <<- tryCatch(as.data.frame(predict(smooth.spline(fitlong), x = min(fitlong$pix):max(fitlong$pix))), error = function(e) NULL)
-    lutFit$y[lutFit$y < 0] <<- 0
-    print(lutFit)
+    if(length(fitlong$lum) > 8)
+      fit <- tryCatch(predict(loess(lum ~ pix, data = fitlong, span = 0.75, degree = 2),
+                              newdata = data.frame(pix = min(fitlong$pix):max(fitlong$pix))),
+                      error = function(e) NULL)
+    else fit <- NULL
+    if(!is.null(fit)) {
+      fit[fit < 0] <- 0
+      lutFit$y[1:length(fit)] <<- fit
+    }
   })
   shinyFileSave(input, "save", roots = roots)
   observeEvent(input$save, {
@@ -128,9 +135,9 @@ lutPlot <- function(lutTable, lutFit) {
   par(mar = c(8, 4, 6, 1))
   plot(0, 0, typ = "n", xlim = c(0, 255), ylim = c(0, 400),
        panel.first = grid(), xlab = "pixel value", ylab = "luminance (cd/m2)")
-  lines(lutFit$x, lutFit$y, col = "red")
   arrows(pix, lum - lum2sem, pix, lum + lum2sem, length = 0, angle = 90)
   points(pix, lum, pch = 21, bg = "white")
+  lines(lutFit$x, lutFit$y, col = "red")
 }
 # generate handsonetable
 handsontable <- function(tab)
